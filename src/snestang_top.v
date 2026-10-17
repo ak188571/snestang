@@ -87,6 +87,11 @@ module snestang_top (
     output [SDRAM_DATA_WIDTH/8-1:0] O_sdram_dqm,       // 
     output [1:0] O_sdram_ba         // 4 banks
 );
+wire osd_input_block;
+`ifdef VERILATOR
+assign osd_input_block=1'b0;
+`endif
+
 
 // Clock signals
 wire mclk;                      // SNES master clock at 21.5054Mhz (~21.477)
@@ -264,6 +269,14 @@ end
 
 wire sysclkf_ce, sysclkr_ce;
 wire overlay;
+wire [31:0] osd_window;
+wire osd_window_toggle,osd_visible;
+`ifndef MCU_BL616
+assign osd_window=32'h0000201c;
+assign osd_window_toggle=1'b0;
+assign osd_input_block=overlay;
+`endif
+
 
 `ifdef CHIP_DSPn
 parameter USE_DSPn=1;
@@ -311,7 +324,7 @@ main #(.USE_DSPn(USE_DSPn), .USE_GSU(USE_GSU)) main (
     .DOTCLK(dotclk), .RGB_OUT(rgb_out), .HBLANKn(hblankn),
     .VBLANKn(vblankn), .X_OUT(x_out), .Y_OUT(y_out),
 
-    .JOY1_DI(overlay?2'b11:snes_joy1_di), .JOY2_DI(overlay?2'b11:snes_joy2_di), .JOY_STRB(snes_joy_strb), 
+    .JOY1_DI(osd_input_block?2'b11:snes_joy1_di), .JOY2_DI(osd_input_block?2'b11:snes_joy2_di), .JOY_STRB(snes_joy_strb),
     .JOY1_CLK(snes_joy1_clk), .JOY2_CLK(snes_joy2_clk), 
 
     .AUDIO_L(audio_l), .AUDIO_R(audio_r), .AUDIO_READY(audio_ready), .AUDIO_EN(audio_en),
@@ -611,6 +624,7 @@ snes2hdmi s2h(
     .pause_snes_for_frame_sync(pause_snes_for_frame_sync),
     .dotclk(dotclk), .hblank(~hblankn),.vblank(~vblankn),.rgb5(rgb_out),
     .xs(x_out), .ys(y_out), 
+    .osd_window(osd_window), .osd_window_toggle(osd_window_toggle), .osd_visible(osd_visible),
     .overlay(overlay), .overlay_x(overlay_x), .overlay_y(overlay_y),
     .overlay_color(overlay_color), 
     .audio_l(audio_l), .audio_r(audio_r), .audio_ready(audio_ready), .audio_en(audio_en),
@@ -621,6 +635,8 @@ snes2hdmi s2h(
 
 iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000)) iosys (
     .clk(mclk), .hclk(hclk), .resetn(resetn),
+    .osd_window(osd_window), .osd_window_toggle(osd_window_toggle), .osd_visible(osd_visible),
+    .osd_input_block(osd_input_block),
     .overlay(overlay), .overlay_x(overlay_x), .overlay_y(overlay_y),
     .overlay_color(overlay_color),
     .joy1(joy1_btns_ds2 | joy1_btns_snes | joy1_usb), .joy2(joy2_btns_ds2 | joy2_btns_snes | joy2_usb), .hid1(hid1), .hid2(hid2),

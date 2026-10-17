@@ -193,4 +193,6 @@ set_option -use_i2c_as_gpio 1
 set_option -use_cpu_as_gpio 1
 set_option -multi_boot 1
 
+add_file -type verilog "src/iosys/tc_osd_layer.sv"
+
 run all

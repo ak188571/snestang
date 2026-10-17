@@ -22,6 +22,7 @@ localparam [14:0] COLOR_BACK    = 15'b00000_00000_00000;
 localparam [14:0] COLOR_TEXT    = 15'b10000_11111_11111;    // yellow
 //localparam [14:0] COLOR_TEXT    = 15'b11000_11000_11000;    // white
 localparam [14:0] COLOR_CURSOR  = 15'b10000_11000_11111;    // orange
+parameter SHOW_LOGO=1;
 // parameter [14:0] COLOR_LOGO    = 15'b00000_10101_00000;    // green
 parameter [14:0] COLOR_LOGO    = 15'b00000_10011_11111;   
 
@@ -100,7 +101,7 @@ always @(posedge hclk) begin    // actual state machine
         state <= MAIN;
         if (state == OUTPUT) color_buf <= color;
         if (x[0] != x_r[0]) begin   // moved to new pixel
-            if (x >= LOGO_X && x < LOGO_X+72 && y >= LOGO_Y && y < LOGO_Y+14) begin
+            if (SHOW_LOGO && x >= LOGO_X && x < LOGO_X+72 && y >= LOGO_Y && y < LOGO_Y+14) begin
                 state <= FETCH_LOGO;
                 logo_active <= 1;
             end else begin

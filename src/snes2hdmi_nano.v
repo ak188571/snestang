@@ -17,8 +17,11 @@ module snes2hdmi (
     input [8:0] ys, // {field,y}
 
     input overlay,
-    output reg [7:0] overlay_x,
-    output reg [7:0] overlay_y,
+    input [31:0] osd_window,
+    input osd_window_toggle,
+    output osd_visible,
+    output [7:0] overlay_x,
+    output [7:0] overlay_y,
     input [14:0] overlay_color,
 
     input [15:0] audio_l,
@@ -217,20 +220,11 @@ module snes2hdmi (
     assign mem_portB_addr = {y[BUF_WIDTH-1:0], x};
     reg [23:0] rgb;
 
-    reg [1:0] overlay_cnt;
-
-    always @(posedge clk_pixel) begin
-        if (cx == 0) begin
-            overlay_x <= 0;
-            overlay_cnt <= 0;
-        end
-        if (cx >= 256) begin
-            overlay_cnt <= overlay_cnt == 2 ? 0 : overlay_cnt + 1;
-            if (overlay_cnt == 1)
-                overlay_x <= overlay_x + 1;
-        end
-        overlay_y <= y;
-    end
+    wire osd_pixel;
+    tc_osd_layer #(.XSTART(256),.YSTART(24),.VIEW_WIDTH(768),.VIEW_HEIGHT(672)) osd_layer(
+        .pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),.active(overlay),
+        .window(osd_window),.window_toggle(osd_window_toggle),.x(overlay_x),.y(overlay_y),
+        .pixel(osd_pixel),.visible(osd_visible));
 
     // calc rgb value to hdmi
     always @(posedge clk_pixel) r_active <= active;
@@ -240,7 +234,7 @@ module snes2hdmi (
 //             if (y < 1)             // XXX: for debug purposes, show a gradient on the top
 //                 rgb <= {x, x, x};
 //             else
-            if (~overlay)
+            if (~osd_pixel)
                 rgb <= {mem_portB_rdata[4:0], 3'b0, mem_portB_rdata[9:5], 3'b0, mem_portB_rdata[14:10], 3'b0};                
             else begin
 //                if (overlay_color == 0) 

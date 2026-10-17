@@ -16,6 +16,10 @@ module snes2hdmi (
     input [8:0] ys, // {field,y}
 
     input overlay,
+    input [31:0] osd_window,
+    input osd_window_toggle,
+    output osd_visible,
+
     output [7:0] overlay_x,
     output [7:0] overlay_y,
     input [14:0] overlay_color,
@@ -65,7 +69,7 @@ module snes2hdmi (
     // video stuff
     wire [9:0] cy, frameHeight;
     wire [10:0] cx, frameWidth;
-    reg active, r_active;
+    reg r_active;
     wire [7:0] x, y;                    // SNES pixel position
 
     //
@@ -213,8 +217,10 @@ module snes2hdmi (
     reg [10:0] ycnt;            // fractional scaling counters
     reg [9:0] cy_r;
     assign mem_portB_addr = {yy[BUF_WIDTH-1:0], xx};
-    assign overlay_x = xx;
-    assign overlay_y = yy;
+    wire osd_pixel;
+tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
+    .active(overlay),.window(osd_window),.window_toggle(osd_window_toggle),
+    .x(overlay_x),.y(overlay_y),.pixel(osd_pixel),.visible(osd_visible));
     localparam XSTART = (1280 - 960) / 2;   // 960:720 = 4:3
     localparam XSTOP = (1280 + 960) / 2;
 
@@ -269,7 +275,7 @@ module snes2hdmi (
     // calc rgb value to hdmi
     always @(posedge clk_pixel) begin
         if (active) begin
-            if (overlay)
+            if (osd_pixel)
                 rgb <= {overlay_color[4:0],3'b0,overlay_color[9:5],3'b0,overlay_color[14:10],3'b0};       // BGR5 to RGB8
             else
                 rgb <= {mem_portB_rdata[4:0], 3'b0, mem_portB_rdata[9:5], 3'b0, mem_portB_rdata[14:10], 3'b0};                

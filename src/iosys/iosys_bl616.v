@@ -21,6 +21,10 @@ module iosys_bl616 #(
 
     // OSD display interface
     output overlay,
+    output reg [31:0] osd_window=32'h0000201c,
+    output reg osd_window_toggle=0,
+    input osd_visible,
+    output osd_input_block,
     input [7:0] overlay_x,          // 0-255
     input [7:0] overlay_y,          // 0-223
     output [14:0] overlay_color,    // BGR5
@@ -43,7 +47,7 @@ module iosys_bl616 #(
     input      [1:0]  fdd_request,      // [1]: write, [0]: read
 
     // Keyboard interface
-    input reg  [7:0] kbd_data,
+    output reg [7:0] kbd_data,
     output reg       kbd_data_valid,
     
     output reg [31:0] core_config,
@@ -53,8 +57,8 @@ module iosys_bl616 #(
     output uart_tx
 );
 
-localparam integer STR_LEN = 73; // number of characters in the config string
-localparam [8*STR_LEN-1:0] CONF_STR = "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101";
+localparam integer STR_LEN = 81; // number of characters in the config string
+localparam [8*STR_LEN-1:0] CONF_STR = "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1";
 
 // Remove SPI parameters and add UART parameters
 localparam CLK_FREQ = FREQ;
@@ -62,6 +66,21 @@ localparam BAUD_RATE = 2_000_000;
 
 reg overlay_reg = 1;
 assign overlay = overlay_reg;
+// The raw-pad path remains available to BL616 while game inputs are inhibited.
+reg [15:0] osd_key=16'h0084;
+reg osd_release=1;
+reg [1:0] osd_visible_sync=0;
+wire osd_chord=(joy1==osd_key)||(joy2==osd_key)||(hid1==osd_key)||(hid2==osd_key);
+assign osd_input_block=overlay_reg||osd_release||osd_chord||osd_visible_sync[1];
+always @(posedge clk) begin
+    if(!resetn)begin osd_release<=1;osd_visible_sync<=0;end
+    else begin
+        osd_visible_sync<={osd_visible_sync[0],osd_visible};
+        if(overlay_reg||osd_chord||osd_visible_sync[1])osd_release<=1;
+        else if((joy1|joy2|hid1|hid2)==0)osd_release<=0;
+    end
+end
+
 
 reg [7:0] rom_loading_reg = LOADING_STATE;
 assign rom_loading = rom_loading_reg;
@@ -181,6 +200,7 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // UART RX: command processing
 always @(posedge clk) begin
     if (!resetn) begin
+        osd_window<=32'h0000201c;osd_window_toggle<=0;osd_key<=16'h0084;
         recv_state <= RECV_IDLE;
         cmd_reg <= 0;
         data_reg <= 0;
@@ -305,6 +325,15 @@ always @(posedge clk) begin
                         kbd_data <= rx_data;
                         kbd_data_valid <= 1;
                     end
+                    'h10: if(len_reg==5&&data_cnt==3)begin
+                        if(data_reg[23:16]<32&&data_reg[15:8]<28&&data_reg[7:0]<=32&&rx_data<=28&&
+                           ({1'b0,data_reg[23:16]}+{1'b0,data_reg[7:0]})<=32&&
+                           ({1'b0,data_reg[15:8]}+{1'b0,rx_data})<=28)begin
+                            osd_window<={data_reg[23:0],rx_data};osd_window_toggle<=~osd_window_toggle;
+                        end
+                    end
+                    'h11: if(len_reg==3&&data_cnt==1&&{data_reg[7:0],rx_data}!=0)
+                        osd_key<={data_reg[7:0],rx_data};
                     default: begin
                         // unknown command: consume all data and return
                     end
@@ -536,7 +565,7 @@ end
 wire [31:0] reg_char_di = {8'b0, x_wr, y_wr, char_wr};
 wire [3:0] reg_char_we = {4{we}};
 
-textdisp #(.COLOR_LOGO(COLOR_LOGO)) disp (
+textdisp #(.COLOR_LOGO(COLOR_LOGO), .SHOW_LOGO(0)) disp (
     .clk(clk), .hclk(hclk), .resetn(resetn),
     .x(overlay_x), .y(overlay_y), .color(overlay_color),
     .reg_char_di(reg_char_di), .reg_char_we(reg_char_we)
