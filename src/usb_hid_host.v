@@ -1,13 +1,13 @@
 // Usb_hid_host: A compact USB HID host core.
 //
 // nand2mario, 8/2023, based on work by hi631
-// 
-// This should support keyboard, mouse and gamepad input out of the box, over low-speed 
-// USB (1.5Mbps). Just connect D+, D-, VBUS (5V) and GND, and two 15K resistors between 
+//
+// This should support keyboard, mouse and gamepad input out of the box, over low-speed
+// USB (1.5Mbps). Just connect D+, D-, VBUS (5V) and GND, and two 15K resistors between
 // D+ and GND, D- and GND. Then provide a 12Mhz clock through usbclk.
 //
 // See https://github.com/nand2mario/usb_hid_host
-// 
+//
 // 3/22/2025: add LB and RB buttons, and SNES layout output `game_snes`
 
 module usb_hid_host (
@@ -16,7 +16,7 @@ module usb_hid_host (
     inout  usb_dm, usb_dp,          // USB D- and D+
 
     output reg [1:0] typ,           // device type. 0: no device, 1: keyboard, 2: mouse, 3: gamepad
-    output reg report,              // pulse after report received from device. 
+    output reg report,              // pulse after report received from device.
                                     // key_*, mouse_*, game_* valid depending on typ
     output conerr,                  // connection or protocol error
 
@@ -29,10 +29,10 @@ module usb_hid_host (
     output reg signed [7:0] mouse_dx,      // signed 8-bit, cleared after `report` pulse
     output reg signed [7:0] mouse_dy,      // signed 8-bit, cleared after `report` pulse
 
-    // gamepad 
+    // gamepad
     output [11:0] game_snes,        // SNES layout buttons (R L X A RT LT DN UP START SELECT Y B)
     output reg game_l, game_r, game_u, game_d,  // left right up down
-    output reg game_a, game_b, game_x, game_y, game_sel, game_sta,  // buttons 
+    output reg game_a, game_b, game_x, game_y, game_sel, game_sta,  // buttons
     output reg game_lb, game_rb,
 
     // debug
@@ -43,6 +43,20 @@ wire data_rdy;          // data ready
 wire data_strobe;       // data strobe for each byte
 wire [7:0] ukpdat;		// actual data
 reg [7:0] regs [7];     // 0 (VID_L), 1 (VID_H), 2 (PID_L), 3 (PID_H), 4 (INTERFACE_CLASS), 5 (INTERFACE_SUBCLASS), 6 (INTERFACE_PROTOCOL)
+
+// --- for controller vid:pid = 0810:0001 --- start
+wire [15:0] dev_vid;
+wire [15:0] dev_pid;
+wire is_0810_0001;
+
+assign dev_vid = {regs[1], regs[0]};
+assign dev_pid = {regs[3], regs[2]};
+
+assign is_0810_0001 =
+    (dev_vid == 16'h0810) &&
+    (dev_pid == 16'h0001);
+// --- for controller vid:pid = 0810:0001 --- end
+
 wire save;			    // save dat[b] to output register r
 wire [3:0] save_r;      // which register to save to
 wire [3:0] save_b;      // dat[b]
@@ -65,7 +79,7 @@ assign dbg_hid_report = {dat[7], dat[6], dat[5], dat[4], dat[3], dat[2], dat[1],
 
 // Gamepad types, see response_recognition below
 // localparam D_GENERIC = 0;
-// localparam D_GAMEPAD = 1;			
+// localparam D_GAMEPAD = 1;
 // localparam D_DS2_ADAPTER = 2;
 // reg [3:0] dev = D_GENERIC;			// device type recognized through VID/PID
 // assign dbg_dev = dev;
@@ -99,55 +113,105 @@ always @(posedge usbclk) begin : process_in_data
                 2: mouse_dy <= ukpdat;
                 endcase
             end else if (typ == 3) begin    // gamepad
-                // A typical report layout:
-                // - d[3] is X axis (0: left, 255: right)
-                // - d[4] is Y axis
-                // - d[5][7:4] is buttons YBAX
-                // - d[6][5:4] is buttons START,SELECT
-                // - d[6][1:0] is buttons LB,RB
-                // Variations:
-                // - Some gamepads uses d[0] and d[1] for X and Y axis.
-                // - Some transmits a different set when d[0][1:0] is 2 (a dualshock adapater)
-                case (rcvct)
-                0: begin
-                    if (ukpdat[1:0] != 2'b10) begin
-                        // for DualShock2 adapter, 2'b10 marks an irrelevant record
-                        valid <= 1;
-                        // game_l <= 0; game_r <= 0; game_u <= 0; game_d <= 0;
-                    end else
-                        valid <= 0;
-                    if (ukpdat==8'h00) {game_l, game_r} <= 2'b10;
-                    if (ukpdat==8'h7f) {game_l, game_r} <= 2'b00;
-                    if (ukpdat==8'hff) {game_l, game_r} <= 2'b01;
+                if (is_0810_0001) begin
+
+                    // -------------------------------------------------
+                    // VID:PID 0810:0001
+                    // Verified report layout:
+                    //   d[3] = X axis
+                    //   d[4] = Y axis
+                    //   d[5][7:4] = YBAX
+                    //   d[6][5:4] = START/SELECT
+                    //   d[6][1:0] = LB/RB
+                    // -------------------------------------------------
+
+                    case (rcvct)
+
+                    3: begin
+                        if (ukpdat < 8'h40)
+                            {game_l, game_r} <= 2'b10;
+                        else if (ukpdat > 8'hC0)
+                            {game_l, game_r} <= 2'b01;
+                        else
+                            {game_l, game_r} <= 2'b00;
+                    end
+
+                    4: begin
+                        if (ukpdat < 8'h40)
+                            {game_u, game_d} <= 2'b10;
+                        else if (ukpdat > 8'hC0)
+                            {game_u, game_d} <= 2'b01;
+                        else
+                            {game_u, game_d} <= 2'b00;
+                    end
+
+                    5: begin
+                        game_x <= ukpdat[4];
+                        game_a <= ukpdat[5];
+                        game_b <= ukpdat[6];
+                        game_y <= ukpdat[7];
+                    end
+
+                    6: begin
+                        game_sel <= ukpdat[4];
+                        game_sta <= ukpdat[5];
+                        game_lb  <= ukpdat[0];
+                        game_rb  <= ukpdat[1];
+                    end
+
+                    endcase
+                end else begin
+                    // -------------------------------------------------
+                    // Original TangCore generic gamepad parser
+                    // -------------------------------------------------
+
+                    case (rcvct)
+
+                    0: begin
+                        if (ukpdat[1:0] != 2'b10) begin
+                            // for DualShock2 adapter,
+                            // 2'b10 marks an irrelevant record
+                            valid <= 1;
+                        end else
+                            valid <= 0;
+
+                        if (ukpdat == 8'h00)
+                            {game_l, game_r} <= 2'b10;
+
+                        if (ukpdat == 8'h7f)
+                            {game_l, game_r} <= 2'b00;
+
+                        if (ukpdat == 8'hff)
+                            {game_l, game_r} <= 2'b01;
+                    end
+
+                    1: begin
+                        if (ukpdat == 8'h00)
+                            {game_u, game_d} <= 2'b10;
+
+                        if (ukpdat == 8'h7f)
+                            {game_u, game_d} <= 2'b00;
+
+                        if (ukpdat == 8'hff)
+                            {game_u, game_d} <= 2'b01;
+                    end
+
+                    5: if (valid) begin
+                        game_x <= ukpdat[4];
+                        game_a <= ukpdat[5];
+                        game_b <= ukpdat[6];
+                        game_y <= ukpdat[7];
+                    end
+
+                    6: if (valid) begin
+                        game_sel <= ukpdat[4];
+                        game_sta <= ukpdat[5];
+                        game_lb  <= ukpdat[0];
+                        game_rb  <= ukpdat[1];
+                    end
+
+                    endcase
                 end
-                1: begin
-                    if (ukpdat==8'h00) {game_u, game_d} <= 2'b10;
-                    if (ukpdat==8'h7f) {game_u, game_d} <= 2'b00;
-                    if (ukpdat==8'hff) {game_u, game_d} <= 2'b01;
-                end
-                // 3: if (valid) begin 
-                //     if (ukpdat[7:6]==2'b00) {game_l, game_r} <= 2'b10;
-                //     if (ukpdat[7:6]==2'b11) {game_l, game_r} <= 2'b01;
-                // end
-                // 4: if (valid) begin 
-                //     if (ukpdat[7:6]==2'b00) {game_u, game_d} <= 2'b10;
-                //     if (ukpdat[7:6]==2'b11) {game_u, game_d} <= 2'b01;
-                // end
-                5: if (valid) begin
-                    game_x <= ukpdat[4];
-                    game_a <= ukpdat[5];
-                    game_b <= ukpdat[6];
-                    game_y <= ukpdat[7];
-                end
-                6: if (valid) begin
-                    game_sel <= ukpdat[4];
-                    game_sta <= ukpdat[5];
-                    game_lb <= ukpdat[0];
-                    game_rb <= ukpdat[1];
-                end
-                endcase
-                // TODO: add any special handling if needed 
-                // (using the detected controller type in 'dev')                
             end
             rcvct <= rcvct + 1;
         end
@@ -169,7 +233,7 @@ always @(posedge usbclk) begin : response_recognition
     retry <= 0;
     if (save) begin
         regs[save_r] <= dat[save_b];
-    end else if (save_delayed && ~save && save_r == 6) begin     
+    end else if (save_delayed && ~save && save_r == 6) begin
         // falling edge of save for bInterfaceProtocol
         if (regs[4] == 3) begin  // bInterfaceClass. 3: HID, other: non-HID
             if (regs[5] == 1)    // bInterfaceSubClass. 1: Boot device
@@ -234,7 +298,7 @@ module ukp(
     wire next = ~(state == S_OPCODE & (
         inst ==2 & dmi |								// start
         (inst==4 || inst==5) & timing != 0 |			// out0/hiz
-        inst ==13 & (~sample | (dpi | dmi) & wk != 1) |	// in 
+        inst ==13 & (~sample | (dpi | dmi) & wk != 1) |	// in
         inst ==14 & ~interval_cy						// wait
     ));
     wire branch = state == S_B1 & cond;
@@ -249,8 +313,8 @@ module ukp(
     usb_hid_host_rom ukprom(.clk(usbclk), .adr(pc), .data(inst));
 
     always @(posedge usbclk) begin
-        if(~usbrst_n) begin 
-            pc <= 0; connected <= 0; cond <= 0; inst_ready <= 0; state <= S_OPCODE; timing <= 0; 
+        if(~usbrst_n) begin
+            pc <= 0; connected <= 0; cond <= 0; inst_ready <= 0; state <= S_OPCODE; timing <= 0;
             mbit <= 0; bitadr <= 0; nak <= 1; ug <= 0;
             save <= 0;
         end else begin
@@ -291,7 +355,7 @@ module ukp(
                     S_S0: begin sb[3:0] <= inst; state <= S_S1; end
                     S_S1: begin sb[7:4] <= inst; state <= S_S2; mbit <= 1; end
                     // toggle and save
-                    S_TOGGLE0: begin 
+                    S_TOGGLE0: begin
                         if (inst == 15) connected <= ~connected;// toggle
                         else save_r <= inst;                    // save
                         state <= S_TOGGLE1;
@@ -305,7 +369,7 @@ module ukp(
                     end
                 endcase
                 // pc control
-                if (mbit==0) begin 
+                if (mbit==0) begin
                     if(jmppc) wpc <= pc + 4;
                     if (next | branch | retpc) begin
                         if(retpc) pc <= wpc;					// ret
@@ -332,22 +396,22 @@ module ukp(
                 end else begin
                     up <=  sb[{1'b1,sadr[1:0]}]; um <= sb[sadr[2:0]];
                 end
-                ug <= 1'b1; 
+                ug <= 1'b1;
                 if(nrztxct!=6) sadr <= sadr - 4'd1;
                 if(sadr==0) begin mbit <= 0; state <= S_OPCODE; end
             end
             // start instruction
             dmid <= dmi;
-            if (inst_ready & state == S_OPCODE & inst == 4'b0010) begin // op=start 
+            if (inst_ready & state == S_OPCODE & inst == 4'b0010) begin // op=start
                 bitadr <= 0; nak <= 1; nrzrxct <= 0;
-            end else 
+            end else
                 if(ug==0 && dmi!=dmid) timing <= 1;
                 else                   timing <= timing + 1;
             // IN instruction
             if (sample) begin
                 if (bitadr == 8) nak <= dmi;
                 if(nrzrxct!=6) begin
-                    data[6:0] <= data[7:1]; 
+                    data[6:0] <= data[7:1];
                     data[7] <= dmis ~^ dmi;		    // ~^/^~ is XNOR, testing bit equality
                     bitadr <= bitadr + 1; nrzon <= 0;
                 end else nrzon <= 1;
@@ -368,12 +432,12 @@ module ukp(
             // Connection status & WDT
             ukprdyd <= ukprdy;
             nakd <= nak;
-            if (ukprdy && ~ukprdyd || inst_ready && state == S_OPCODE && inst == 4'b0010) 
+            if (ukprdy && ~ukprdyd || inst_ready && state == S_OPCODE && inst == 4'b0010)
                 conct <= 0;     // reset watchdog on data received or START instruction
-            else begin 
+            else begin
                 if(conct[23:22]!=2'b11) conct <= conct + 1;
                 else begin pc <= 0; conct <= 0; end		// !! WDT ON
-            end 
+            end
         end
     end
 
@@ -383,7 +447,7 @@ module ukp(
     assign sample = inst_ready & state == S_OPCODE & inst == 4'b1101 & timing == 4; // IN
     assign record = connected & ~nak;
     assign ukpstb = ~nrzon & ukprdy & (bitadr[2:0] == 3'b100) & (timing == 2);
-    reg    dpi, dmi; 
+    reg    dpi, dmi;
     reg    ukprdyd;
     reg    nakd;
 endmodule
@@ -392,8 +456,8 @@ module usb_hid_host_rom(clk, adr, data);
 	input clk;
 	input [13:0] adr;
 	output [3:0] data;
-	reg [3:0] data; 
-	reg [3:0] mem [536];
+	reg [3:0] data;
+	reg [3:0] mem [635];
 	initial $readmemh("usb_hid_host_rom.hex", mem);
 	always @(posedge clk) data <= mem[adr];
 endmodule
