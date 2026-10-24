@@ -577,12 +577,18 @@ wire clk12;
 wire pll_lock_12;
 wire usb_conerr;
 wire [1:0] usb_type;
+wire p1_report;
+wire p1_connected;
+wire p1_auto_start_seen, p1_auto_wdt_seen;
 pll_12 pll12(.clkin(sys_clk), .clkout0(clk12), .lock(pll_lock_12));
 usb_hid_host usb_hid_host (
-    .usbclk(clk12), .usbrst_n(pll_lock_12),
+    .usbclk(clk12), .usbrst_n(pll_lock_12 && s0),
     .usb_dm(usb1_dn), .usb_dp(usb1_dp),
     .typ(usb_type), .conerr(usb_conerr),
-    .game_snes(joy1_usb)
+    .game_snes(joy1_usb), .report(p1_report),
+    .dbg_connected(p1_connected),
+    .dbg_auto_start_seen(p1_auto_start_seen),
+    .dbg_auto_wdt_seen(p1_auto_wdt_seen)
 );
 `else
 assign joy1_usb = 12'h0;
@@ -592,11 +598,43 @@ assign joy1_usb = 12'h0;
 wire usb_conerr2;
 wire [1:0] usb_type2;   
 usb_hid_host usb_hid_host2 (
-    .usbclk(clk12), .usbrst_n(pll_lock_12),
+    .usbclk(clk12), .usbrst_n(pll_lock_12 && s0),
     .usb_dm(usb2_dn), .usb_dp(usb2_dp),
     .game_snes(joy2_usb), .typ(usb_type2), .conerr(usb_conerr2)
 );
-assign led = ~{joy2_usb[1:0], usb_type2, usb_conerr2, usb_type, usb_conerr};
+reg [11:0] p1_buttons_prev = 0;
+reg [22:0] p1_button_hold = 0, p1_report_hold = 0;
+localparam integer LED_HOLD_CYCLES = 6000000; // 0.5 s at 12 MHz
+always @(posedge clk12) begin
+    if (!pll_lock_12 || !s0) begin
+        p1_buttons_prev <= 0;
+        p1_button_hold <= 0;
+        p1_report_hold <= 0;
+    end else begin
+        p1_buttons_prev <= joy1_usb;
+        if (|(joy1_usb & ~p1_buttons_prev)) p1_button_hold <= LED_HOLD_CYCLES;
+        else if (p1_button_hold != 0) p1_button_hold <= p1_button_hold - 1'b1;
+        if (p1_report) p1_report_hold <= LED_HOLD_CYCLES;
+        else if (p1_report_hold != 0) p1_report_hold <= p1_report_hold - 1'b1;
+    end
+end
+reg [22:0] signature_count = 0;
+reg signature_blink = 0;
+always @(posedge clk12) begin
+    if (!pll_lock_12) begin
+        signature_count <= 0;
+        signature_blink <= 0;
+    end else if (signature_count == 23'd5999999) begin
+        signature_count <= 0;
+        signature_blink <= ~signature_blink;
+    end else
+        signature_count <= signature_count + 1'b1;
+end
+wire [7:0] diagnostic_lit = {signature_blink, 1'b1, usb_conerr,
+                              p1_auto_wdt_seen, p1_auto_start_seen,
+                              (p1_report_hold != 0), p1_connected,
+                              (p1_button_hold != 0)};
+assign led = s0 ? ~diagnostic_lit : 8'h00; // all on while S1 is pressed
 `else
 assign joy2_usb = 12'h0;
 `endif
