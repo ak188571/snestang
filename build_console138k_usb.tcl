@@ -1,0 +1,221 @@
+# Verified USB path for Tang Mega138K Console; other boards use build.tcl.
+if {$argc < 1 || [lindex $argv 0] ne "console138k"} {
+    error "This script targets console138k; use build.tcl for other devices."
+}
+if {$argc == 0} {
+    puts "Usage: $argv0 <device> [<controller>]"
+    puts "          device: nano20k, primer25k, mega60k, mega138k, console60k"
+    puts "      controller: snes, ds2"
+    puts "Note: nano20k supports both controllers simultaneously, so build with just: gw_sh build.tcl nano20k"
+    exit 1
+}
+
+set dev [lindex $argv 0]
+if {$argc >= 2} {
+    set controller [lindex $argv 1]
+} else {
+    set controller ""
+}
+
+# process $dev and $controller
+if {$dev eq "nano20k"} {
+    set_device GW2AR-LV18QN88C8/I7 -device_version C
+    add_file src/boards/nano20k.v
+    add_file -type verilog "src/snes2hdmi_nano.v"
+    add_file -type cst "src/boards/nano20k.cst"
+    add_file -type verilog "src/pllr/gowin_pll_hdmi.v"
+    add_file -type verilog "src/pllr/gowin_pll_snes.v"
+    add_file -type verilog "src/sdram_nano.v"
+    # nano20k supports both controllers simultaneously
+    set_option -output_base_name snestang_${dev}
+} elseif {$dev eq "primer25k"} {
+    set_device GW5A-LV25MG121NC1/I0 -device_version A
+    if {$controller eq "snes"} {
+        add_file src/boards/primer25k_snescontroller.v
+        add_file -type cst "src/boards/primer25k_snescontroller.cst"
+    } elseif {$controller eq "ds2"} {
+        add_file src/boards/primer25k.v
+        add_file -type cst "src/boards/primer25k.cst"
+    } else {
+        error "Unknown controller $controller"
+    }
+    add_file -type verilog "src/snes2hdmi.v"
+    add_file -type verilog "src/plla/gowin_pll_27.v"
+    add_file -type verilog "src/plla/gowin_pll_hdmi.v"
+    add_file -type verilog "src/plla/gowin_pll_snes.v"
+    add_file -type verilog "src/sdram_cl2_3ch.v"
+    add_file -type verilog "src/usb_hid_host.v"
+    add_file -type verilog "src/plla/pll_12.v"
+    set_option -output_base_name snestang_${dev}_${controller}
+} elseif {$dev eq "mega60k"} {
+    set_device GW5AT-LV60PG484AC1/I0 -device_version B
+    if {$controller eq "snes"} {
+        add_file src/boards/mega60k_snescontroller.v
+        add_file -type cst "src/boards/mega60k_snescontroller.cst"
+    } elseif {$controller eq "ds2"} {
+        add_file src/boards/mega60k.v
+        add_file -type cst "src/boards/mega60k.cst"
+    } else {
+        error "Unknown controller $controller"
+    }
+    add_file -type verilog "src/snes2hdmi.v"
+    add_file -type verilog "src/plla/gowin_pll_27.v"
+    add_file -type verilog "src/plla/gowin_pll_hdmi.v"
+    add_file -type verilog "src/plla/gowin_pll_snes.v"
+    add_file -type verilog "src/sdram_cl2_3ch.v"
+    set_option -output_base_name snestang_${dev}_${controller}
+} elseif {$dev eq "mega138k"} {
+    set_device GW5AST-LV138FPG676AES -device_version B
+    if {$controller eq "snes"} {
+        add_file src/boards/mega138k_snescontroller.v
+        add_file -type cst "src/boards/mega138k_snescontroller.cst"
+    } elseif {$controller eq "ds2"} {
+        add_file src/boards/mega138k.v
+        add_file -type cst "src/boards/mega138k.cst"
+    } else {
+        error "Unknown controller $controller"
+    }
+    add_file -type verilog "src/snes2hdmi.v"
+    add_file -type verilog "src/pll/gowin_pll_27.v"
+    add_file -type verilog "src/pll/gowin_pll_hdmi.v"
+    add_file -type verilog "src/pll/gowin_pll_snes.v"
+    add_file -type verilog "src/sdram_cl2_2ch.v"
+    add_file -type verilog "src/vram.v"
+    add_file -type verilog "src/vram_spb.v"
+    set_option -output_base_name snestang_${dev}_${controller}
+} elseif {$dev eq "console60k"} {
+    set_device GW5AT-LV60PG484AC1/I0 -device_version B
+    if {$controller eq "snes"} {
+        add_file src/boards/console60k_snescontroller.v
+        add_file -type cst "src/boards/console60k_snescontroller.cst"
+    } elseif {$controller eq "ds2"} {
+        add_file src/boards/console60k.v
+        add_file -type cst "src/boards/console.cst"
+    } else {
+        error "Unknown controller $controller"
+    }
+    add_file -type verilog "src/snes2hdmi.v"
+    add_file -type verilog "src/plla/gowin_pll_27.v"
+    add_file -type verilog "src/plla/gowin_pll_hdmi.v"
+    add_file -type verilog "src/plla/gowin_pll_snes.v"
+    add_file -type verilog "src/sdram_cl2_3ch.v"
+    add_file -type verilog "src/usb_hid_host.v"
+    add_file -type verilog "src/plla/pll_12.v"
+    set_option -output_base_name snestang_${dev}_${controller}
+} elseif {$dev eq "console138k"} {
+    set_device GW5AST-LV138PG484AC1/I0 -device_version B
+    add_file src/boards/console138k.v
+    add_file -type cst "src/boards/console.cst"
+    add_file -type verilog "src/snes2hdmi.v"
+    add_file -type verilog "src/pll/gowin_pll_27.v"
+    add_file -type verilog "src/pll/gowin_pll_hdmi.v"
+    add_file -type verilog "src/pll/gowin_pll_snes.v"
+    add_file -type verilog "src/sdram_cl2_2ch.v"
+    add_file -type verilog "src/vram.v"
+    add_file -type verilog "src/vram_spb.v"
+    add_file -type verilog "src/usb/usb_game_port.sv"
+    add_file -type verilog "src/usb/usb_frame_scheduler.sv"
+    add_file -type verilog "src/usb/usb_interrupt_poll.sv"
+    add_file -type verilog "src/usb/usb_control_transfer.sv"
+    add_file -type verilog "src/usb/usb_enumeration.sv"
+    add_file -type verilog "src/usb/usb_ls_packet.sv"
+    add_file -type verilog "src/usb/usb_rx_guard.sv"
+    add_file -type verilog "src/usb/usb_game_cdc.sv"
+    add_file -type verilog "src/usb/usb_hid_host_integrated.sv"
+    add_file -type verilog "src/pll/pll_usb.v"
+    set_option -output_base_name snestang_${dev}_${controller}
+} else {
+    error "Unknown device $dev"
+}
+
+add_file -type verilog "src/iosys/iosys_bl616.v"
+add_file -type verilog "src/iosys/uart_fractional.v"
+add_file -type verilog "src/iosys/textdisp.v"
+add_file -type verilog "src/iosys/uart_fixed.v"
+add_file -type verilog "src/iosys/crc16.v"
+
+add_file -type verilog "src/65C816/ALU.v"
+add_file -type verilog "src/65C816/AddSubBCD.v"
+add_file -type verilog "src/65C816/AddrGen.v"
+add_file -type verilog "src/65C816/BCDAdder.v"
+add_file -type verilog "src/65C816/P65C816.v"
+add_file -type verilog "src/65C816/adder4.v"
+add_file -type verilog "src/65C816/bit_adder.v"
+add_file -type verilog "src/65C816/common.sv"
+add_file -type verilog "src/65C816/mcode.sv"
+add_file -type verilog "src/CEGen.v"
+add_file -type verilog "src/chip/DSP/DSP_LHRomMap.v"
+add_file -type verilog "src/chip/DSP/DSPn.v"
+add_file -type verilog "src/chip/DSP/OBC1.v"
+add_file -type verilog "src/chip/DSP/SRTC.v"
+add_file -type verilog "src/chip/dsp/dsp_data_ram.v"
+add_file -type verilog "src/cpu.v"
+add_file -type verilog "src/dsp.v"
+add_file -type verilog "src/dual_clk_fifo.v"
+add_file -type verilog "src/dualshock_controller.v"
+add_file -type verilog "src/gowin_dpb_cgram.v"
+add_file -type verilog "src/gowin_dpb_hoam.v"
+add_file -type verilog "src/gowin_dpb_oam.v"
+add_file -type verilog "src/hdmi2/audio_clock_regeneration_packet.sv"
+add_file -type verilog "src/hdmi2/audio_info_frame.sv"
+add_file -type verilog "src/hdmi2/audio_sample_packet.sv"
+add_file -type verilog "src/hdmi2/auxiliary_video_information_info_frame.sv"
+add_file -type verilog "src/hdmi2/hdmi.sv"
+add_file -type verilog "src/hdmi2/packet_assembler.sv"
+add_file -type verilog "src/hdmi2/packet_picker.sv"
+add_file -type verilog "src/hdmi2/serializer.sv"
+add_file -type verilog "src/hdmi2/source_product_description_info_frame.sv"
+add_file -type verilog "src/hdmi2/tmds_channel.sv"
+add_file -type verilog "src/iosys/gowin_dpb_menu.v"
+add_file -type verilog "src/main.v"
+add_file -type verilog "src/ppu.v"
+add_file -type verilog "src/ppucgram.v"
+add_file -type verilog "src/ppuhoam.v"
+add_file -type verilog "src/ppuoam.v"
+add_file -type verilog "src/smc_parser.v"
+add_file -type verilog "src/smp.v"
+add_file -type verilog "src/snes.v"
+add_file -type verilog "src/controller_adapter.sv"
+add_file -type verilog "src/controller_ds2.sv"
+add_file -type verilog "src/controller_snes.v"
+add_file -type verilog "src/snestang_console138k_usb_top.v"
+add_file -type verilog "src/spc700/_spc700_package.v"
+add_file -type verilog "src/spc700/addrgen.v"
+add_file -type verilog "src/spc700/addsub.v"
+add_file -type verilog "src/spc700/alu.v"
+add_file -type verilog "src/spc700/bcdadj.v"
+add_file -type verilog "src/spc700/mcode.v"
+add_file -type verilog "src/spc700/muldiv.v"
+add_file -type verilog "src/spc700/spc700.v"
+add_file -type verilog "src/swram.v"
+add_file -type verilog "src/uart_tx_V2.v"
+add_file -type sdc "src/snestang.sdc"
+add_file -type gao -disable "src/mega138k/snestang.gao"
+
+add_file -type verilog "src/usb/usb_fs_packet.sv"
+add_file -type verilog "src/usb/usb_fs_rx_guard.sv"
+add_file -type verilog "src/usb/usb_fs_frame_scheduler.sv"
+add_file -type verilog "src/usb/usb_xusb_poll.sv"
+add_file -type verilog "src/usb/usb_xusb_input.sv"
+add_file -type verilog "src/usb/usb_fs_control_transfer.sv"
+add_file -type verilog "src/usb/usb_xusb_enumeration.sv"
+add_file -type verilog "src/usb/usb_xusb_port.sv"
+add_file -type verilog "src/usb/usb_dual_speed_host.sv"
+set_option -synthesis_tool gowinsynthesis
+set_option -top_module snestang_top
+set_option -verilog_std sysv2017
+set_option -rw_check_on_ram 1
+set_option -place_option 2
+set_option -use_mspi_as_gpio 1
+set_option -use_sspi_as_gpio 1
+set_option -use_ready_as_gpio 1
+set_option -use_done_as_gpio 1
+set_option -use_i2c_as_gpio 1
+set_option -use_cpu_as_gpio 1
+set_option -multi_boot 1
+
+add_file -type verilog "src/iosys/tc_osd_layer.sv"
+
+add_file -type sdc "console138k_combined.sdc"
+run syn
+run pnr

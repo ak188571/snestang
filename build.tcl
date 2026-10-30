@@ -1,3 +1,7 @@
+# console138k selects the verified USB build; other targets retain their existing path.
+if {$argc > 0 && [lindex $argv 0] eq "console138k"} {
+    source [file join [file dirname [info script]] "build_console138k_usb.tcl"]
+} else {
 if {$argc == 0} {
     puts "Usage: $argv0 <device> [<controller>]"
     puts "          device: nano20k, primer25k, mega60k, mega138k, console60k"
@@ -196,3 +200,5 @@ set_option -multi_boot 1
 add_file -type verilog "src/iosys/tc_osd_layer.sv"
 
 run all
+
+}
