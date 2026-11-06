@@ -12,6 +12,7 @@ module iosys_bl616 #(
     parameter [14:0] COLOR_LOGO=15'b00000_10101_00000,
     parameter [15:0] CORE_ID=1,     // 1: nestang, 2: snestang
     parameter SUPPORT_RESTART=0,
+    parameter SUPPORT_BLUR=0,
     parameter SUPPORT_CRT=0, // Console138K stage1 bypass and frame-applied status
     parameter [7:0] LOADING_STATE=0
 )
@@ -61,8 +62,9 @@ module iosys_bl616 #(
     output uart_tx
 );
 
-localparam integer STR_LEN = 81 + (SUPPORT_CRT ? 8 : 0) + (SUPPORT_RESTART ? 8 : 0);
-localparam [8*STR_LEN-1:0] CONF_STR = SUPPORT_CRT ?
+localparam integer STR_LEN = 81 + (SUPPORT_CRT ? 8 : 0) + (SUPPORT_CRT && SUPPORT_BLUR ? 8 : 0) + (SUPPORT_RESTART ? 8 : 0);
+localparam [8*STR_LEN-1:0] CONF_STR = (SUPPORT_CRT && SUPPORT_BLUR) ?
+    (SUPPORT_RESTART ? "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1;CRTBLR1;RSTROM1" : "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1;CRTBLR1") : SUPPORT_CRT ?
     (SUPPORT_RESTART ? "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1;RSTROM1" : "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1") :
     (SUPPORT_RESTART ? "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;RSTROM1" : "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1");
 

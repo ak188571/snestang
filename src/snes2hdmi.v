@@ -3,7 +3,7 @@
 
 `timescale 1ns / 1ps
 
-module snes2hdmi #(parameter CRT_STAGE1=0) (
+module snes2hdmi #(parameter CRT_STAGE1=0, CRT_BLUR=0) (
 	input clk,      // snes clock
 	input resetn,
 
@@ -219,7 +219,13 @@ module snes2hdmi #(parameter CRT_STAGE1=0) (
     reg [10:0] xcnt;
     reg [10:0] ycnt;            // fractional scaling counters
     reg [9:0] cy_r;
-    assign mem_portB_addr = {yy[BUF_WIDTH-1:0], xx};
+    wire [31:0] crt_config_active;
+    wire blur_enabled=CRT_STAGE1 && CRT_BLUR && crt_config_active[16] && |crt_config_active[18:17];
+    // Current SNES scaler: 256/960 source pixels per output pixel. Three
+    // output-pixel lookahead advances at most one source column (carry >=192).
+    // Keep the exact original address when blur is inactive, including live writes.
+    wire [7:0] xx_three=xx+(xcnt>=11'd192 ? 8'd1 : 8'd0);
+    assign mem_portB_addr = {yy[BUF_WIDTH-1:0], (blur_enabled?xx_three:xx)};
     wire osd_pixel;
 tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
     .active(overlay),.window(osd_window),.window_toggle(osd_window_toggle),
@@ -275,9 +281,7 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
 
     end
 
-    // Stage1 accepts settings at frame boundaries while the game RGB remains
-    // the exact legacy BGR555-to-RGB888 path. No effect latency or prefetch.
-    wire [31:0] crt_config_active;
+    // Frame-applied settings. BGR555 conversion remains the original bit extension.
     wire [23:0] game_rgb_raw={mem_portB_rdata[4:0],3'b0,
         mem_portB_rdata[9:5],3'b0,mem_portB_rdata[14:10],3'b0};
     wire [23:0] game_rgb_crt;
@@ -285,7 +289,17 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
         tc_crt_config crt_config(.clk(clk),.pclk(clk_pixel),.resetn(resetn),
             .requested(core_config),.frame_start(cx==0 && cy==0),
             .active_config(crt_config_active),.applied_config(crt_config_applied));
-        tc_crt_bypass crt(.rgb_in(game_rgb_raw),.rgb_out(game_rgb_crt));
+        if(CRT_BLUR)begin : blur_path
+            // Scanline is not implemented/advertised in S3a. Retain its request
+            // bits in the mailbox but keep them outside the pixel effect path.
+            crt_filter crt(.pclk(clk_pixel),.resetn(resetn),
+                .rgb_in(game_rgb_raw),.config_active(crt_config_active & ~32'h00180000),
+                .first_pixel(cx==(blur_enabled?XSTART-1:XSTART)),
+                .last_pixel(cx==(blur_enabled?XSTOP-2:XSTOP-1)),.scan_depth(4'd0),
+                .rgb_out(game_rgb_crt));
+        end else begin : bypass_path
+            tc_crt_bypass crt(.rgb_in(game_rgb_raw),.rgb_out(game_rgb_crt));
+        end
     end else begin : no_crt
         assign crt_config_active=0;
         assign crt_config_applied=0;

@@ -672,7 +672,7 @@ wire [7:0] overlay_y;
 wire [7:0] dbg_dat_out_loader;
 
 wire [31:0] core_config,crt_config_applied;
-snes2hdmi #(.CRT_STAGE1(1)) s2h(
+snes2hdmi #(.CRT_STAGE1(1), .CRT_BLUR(1)) s2h(
     .clk(mclk), .resetn(resetn), .snes_refresh(refresh),
     .core_config(core_config), .crt_config_applied(crt_config_applied),
     .pause_snes_for_frame_sync(pause_snes_for_frame_sync),
@@ -687,7 +687,7 @@ snes2hdmi #(.CRT_STAGE1(1)) s2h(
     .tmds_d_n(tmds_d_n), .tmds_d_p(tmds_d_p)
 );
 
-iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000), .SUPPORT_RESTART(1), .SUPPORT_CRT(1)) iosys (
+iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000), .SUPPORT_RESTART(1), .SUPPORT_CRT(1), .SUPPORT_BLUR(1)) iosys (
     .clk(mclk), .hclk(hclk), .resetn(resetn),
     .osd_window(osd_window), .osd_window_toggle(osd_window_toggle), .osd_visible(osd_visible),
     .osd_input_block(osd_input_block),

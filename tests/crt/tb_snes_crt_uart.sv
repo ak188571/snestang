@@ -1,5 +1,5 @@
 `timescale 1ns/1ps
-module tb_snes_crt_uart #(parameter integer FREQ=32000000, parameter real HALF_PERIOD=5.0, BIT_NS=160.0);
+module tb_snes_crt_uart #(parameter integer FREQ=32000000, EXPECT_BLUR=0, parameter real HALF_PERIOD=5.0, BIT_NS=160.0);
     reg clk=0,hclk=0,resetn=0;
     always #(HALF_PERIOD) clk=~clk;always #2 hclk=~hclk;
     reg uart_rx=1;
@@ -7,7 +7,7 @@ module tb_snes_crt_uart #(parameter integer FREQ=32000000, parameter real HALF_P
     reg [11:0] joy1=0,joy2=0;
     wire [31:0] core_config,crt_config_applied,active_config;
     reg frame_start=0;
-    iosys_bl616 #(.FREQ(FREQ),.SUPPORT_CRT(1),.SUPPORT_RESTART(1)) dut(
+    iosys_bl616 #(.FREQ(FREQ),.SUPPORT_CRT(1),.SUPPORT_RESTART(1),.SUPPORT_BLUR(EXPECT_BLUR)) dut(
         .clk(clk),.hclk(hclk),.resetn(resetn),.uart_rx(uart_rx),.uart_tx(uart_tx),
         .overlay(overlay),.osd_visible(1'b0),.osd_input_block(osd_input_block),
         .overlay_x(8'b0),.overlay_y(8'b0),.joy1(joy1),.joy2(joy2),
@@ -97,7 +97,7 @@ module tb_snes_crt_uart #(parameter integer FREQ=32000000, parameter real HALF_P
                 if(k>=6&&{received[k-6],received[k-5],received[k-4],received[k-3],received[k-2],received[k-1],received[k]}=="CRTBLR1")blur_marker=1;
                 if(k>=6&&{received[k-6],received[k-5],received[k-4],received[k-3],received[k-2],received[k-1],received[k]}=="CRTSCN1")scan_marker=1;
             end
-            if(!marker||blur_marker||scan_marker)$fatal(1,"stage capability not transmitted");
+            if(!marker||blur_marker!=(EXPECT_BLUR!=0)||scan_marker)$fatal(1,"stage capability not transmitted");
         end
         // A previous setting can already be in the mailbox. Allow it to apply,
         // then the latest coalesced value at a subsequent frame boundary.
