@@ -652,11 +652,13 @@ assign joy2_usb = 12'h0;
 `endif
 
 // output button presses to SNES
-controller_adapter joy1_adapter (
+controller_adapter #(.BLOCK_OSD(1)) joy1_adapter (
+    .input_block(osd_input_block),
     .clk(mclk), .snes_joy_strb(snes_joy_strb), 
     .snes_buttons(joy1_btns_ds2 | joy1_btns_snes | hid1 | joy1_usb), .snes_joy_clk(snes_joy1_clk), .snes_joy_di(snes_joy1_di[0])
 );
-controller_adapter joy2_adapter (
+controller_adapter #(.BLOCK_OSD(1)) joy2_adapter (
+    .input_block(osd_input_block),
     .clk(mclk), .snes_joy_strb(snes_joy_strb), 
     .snes_buttons(joy2_btns_ds2 | joy2_btns_snes | hid2 | joy2_usb), .snes_joy_clk(snes_joy2_clk), .snes_joy_di(snes_joy2_di[0])
 );
@@ -669,8 +671,10 @@ wire [7:0] overlay_y;
 
 wire [7:0] dbg_dat_out_loader;
 
-snes2hdmi s2h(
+wire [31:0] core_config,crt_config_applied;
+snes2hdmi #(.CRT_STAGE1(1)) s2h(
     .clk(mclk), .resetn(resetn), .snes_refresh(refresh),
+    .core_config(core_config), .crt_config_applied(crt_config_applied),
     .pause_snes_for_frame_sync(pause_snes_for_frame_sync),
     .dotclk(dotclk), .hblank(~hblankn),.vblank(~vblankn),.rgb5(rgb_out),
     .xs(x_out), .ys(y_out), 
@@ -683,7 +687,7 @@ snes2hdmi s2h(
     .tmds_d_n(tmds_d_n), .tmds_d_p(tmds_d_p)
 );
 
-iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000), .SUPPORT_RESTART(1)) iosys (
+iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000), .SUPPORT_RESTART(1), .SUPPORT_CRT(1)) iosys (
     .clk(mclk), .hclk(hclk), .resetn(resetn),
     .osd_window(osd_window), .osd_window_toggle(osd_window_toggle), .osd_visible(osd_visible),
     .osd_input_block(osd_input_block),
@@ -691,6 +695,8 @@ iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000), .SUPPORT_RESTART(1)) iosys (
     .overlay_color(overlay_color),
     .joy1(joy1_btns_ds2 | joy1_btns_snes | joy1_usb), .joy2(joy2_btns_ds2 | joy2_btns_snes | joy2_usb), .hid1(hid1), .hid2(hid2),
     .uart_tx(UART_TXD), .uart_rx(UART_RXD),
+    .core_config(core_config), .crt_config_applied(crt_config_applied),
+    .mgmt_readdata(16'b0), .fdd_request(2'b0),
     .game_reset(game_reset), .rom_loading(loading), .rom_do(loader_do), .rom_do_valid(loader_do_valid)
 );
 

@@ -215,6 +215,8 @@ set_option -use_cpu_as_gpio 1
 set_option -multi_boot 1
 
 add_file -type verilog "src/iosys/tc_osd_layer.sv"
+add_file -type verilog "src/iosys/tc_crt_config.sv"
+add_file -type verilog "src/iosys/tc_crt_bypass.sv"
 
 add_file -type sdc "console138k_combined.sdc"
 run syn

@@ -99,3 +99,73 @@ set_false_path -to [get_regs {usb_hid_host/fs_to_ls/dst_data_13_s0 usb_hid_host2
 
 # Explicit PLL output clock, following the existing clk12 output-clock policy.
 create_clock -name clk96 -period 10.416666667 -waveform {0 5.2083333335} [get_nets {clk96}]
+
+# CRT stage1 acknowledged frame-boundary mailbox.
+
+set_false_path -to [get_regs {s2h/crt_stage1.crt_config/req_sync_0_s0 s2h/crt_stage1.crt_config/ack_sync_0_s0}]
+set_false_path -to [get_regs {
+ s2h/crt_stage1.crt_config/pending_0_s0
+ s2h/crt_stage1.crt_config/pending_1_s0
+ s2h/crt_stage1.crt_config/pending_2_s0
+ s2h/crt_stage1.crt_config/pending_3_s0
+ s2h/crt_stage1.crt_config/pending_4_s0
+ s2h/crt_stage1.crt_config/pending_5_s0
+ s2h/crt_stage1.crt_config/pending_6_s0
+ s2h/crt_stage1.crt_config/pending_7_s0
+ s2h/crt_stage1.crt_config/pending_8_s0
+ s2h/crt_stage1.crt_config/pending_9_s0
+ s2h/crt_stage1.crt_config/pending_10_s0
+ s2h/crt_stage1.crt_config/pending_11_s0
+ s2h/crt_stage1.crt_config/pending_12_s0
+ s2h/crt_stage1.crt_config/pending_13_s0
+ s2h/crt_stage1.crt_config/pending_14_s0
+ s2h/crt_stage1.crt_config/pending_15_s0
+ s2h/crt_stage1.crt_config/pending_16_s0
+ s2h/crt_stage1.crt_config/pending_17_s0
+ s2h/crt_stage1.crt_config/pending_18_s0
+ s2h/crt_stage1.crt_config/pending_19_s0
+ s2h/crt_stage1.crt_config/pending_20_s0
+ s2h/crt_stage1.crt_config/pending_21_s0
+ s2h/crt_stage1.crt_config/pending_22_s0
+ s2h/crt_stage1.crt_config/pending_23_s0
+ s2h/crt_stage1.crt_config/pending_24_s0
+ s2h/crt_stage1.crt_config/pending_25_s0
+ s2h/crt_stage1.crt_config/pending_26_s0
+ s2h/crt_stage1.crt_config/pending_27_s0
+ s2h/crt_stage1.crt_config/pending_28_s0
+ s2h/crt_stage1.crt_config/pending_29_s0
+ s2h/crt_stage1.crt_config/pending_30_s0
+ s2h/crt_stage1.crt_config/pending_31_s0
+ s2h/crt_stage1.crt_config/applied_config_0_s0
+ s2h/crt_stage1.crt_config/applied_config_1_s0
+ s2h/crt_stage1.crt_config/applied_config_2_s0
+ s2h/crt_stage1.crt_config/applied_config_3_s0
+ s2h/crt_stage1.crt_config/applied_config_4_s0
+ s2h/crt_stage1.crt_config/applied_config_5_s0
+ s2h/crt_stage1.crt_config/applied_config_6_s0
+ s2h/crt_stage1.crt_config/applied_config_7_s0
+ s2h/crt_stage1.crt_config/applied_config_8_s0
+ s2h/crt_stage1.crt_config/applied_config_9_s0
+ s2h/crt_stage1.crt_config/applied_config_10_s0
+ s2h/crt_stage1.crt_config/applied_config_11_s0
+ s2h/crt_stage1.crt_config/applied_config_12_s0
+ s2h/crt_stage1.crt_config/applied_config_13_s0
+ s2h/crt_stage1.crt_config/applied_config_14_s0
+ s2h/crt_stage1.crt_config/applied_config_15_s0
+ s2h/crt_stage1.crt_config/applied_config_16_s0
+ s2h/crt_stage1.crt_config/applied_config_17_s0
+ s2h/crt_stage1.crt_config/applied_config_18_s0
+ s2h/crt_stage1.crt_config/applied_config_19_s0
+ s2h/crt_stage1.crt_config/applied_config_20_s0
+ s2h/crt_stage1.crt_config/applied_config_21_s0
+ s2h/crt_stage1.crt_config/applied_config_22_s0
+ s2h/crt_stage1.crt_config/applied_config_23_s0
+ s2h/crt_stage1.crt_config/applied_config_24_s0
+ s2h/crt_stage1.crt_config/applied_config_25_s0
+ s2h/crt_stage1.crt_config/applied_config_26_s0
+ s2h/crt_stage1.crt_config/applied_config_27_s0
+ s2h/crt_stage1.crt_config/applied_config_28_s0
+ s2h/crt_stage1.crt_config/applied_config_29_s0
+ s2h/crt_stage1.crt_config/applied_config_30_s0
+ s2h/crt_stage1.crt_config/applied_config_31_s0
+}]

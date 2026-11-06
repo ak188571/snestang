@@ -8,3 +8,4 @@ gwsynthesis
 temp
 roms
 *.user
+build-crt/

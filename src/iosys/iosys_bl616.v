@@ -12,6 +12,7 @@ module iosys_bl616 #(
     parameter [14:0] COLOR_LOGO=15'b00000_10101_00000,
     parameter [15:0] CORE_ID=1,     // 1: nestang, 2: snestang
     parameter SUPPORT_RESTART=0,
+    parameter SUPPORT_CRT=0, // Console138K stage1 bypass and frame-applied status
     parameter [7:0] LOADING_STATE=0
 )
 (
@@ -53,15 +54,17 @@ module iosys_bl616 #(
     output reg       kbd_data_valid,
     
     output reg [31:0] core_config,
+    input [31:0] crt_config_applied,
 
     // UART interface
     input  uart_rx,
     output uart_tx
 );
 
-localparam integer STR_LEN = 81 + (SUPPORT_RESTART ? 8 : 0);
-localparam [8*STR_LEN-1:0] CONF_STR = SUPPORT_RESTART ?
-    "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;RSTROM1" : "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1";
+localparam integer STR_LEN = 81 + (SUPPORT_CRT ? 8 : 0) + (SUPPORT_RESTART ? 8 : 0);
+localparam [8*STR_LEN-1:0] CONF_STR = SUPPORT_CRT ?
+    (SUPPORT_RESTART ? "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1;RSTROM1" : "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1") :
+    (SUPPORT_RESTART ? "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;RSTROM1" : "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1");
 
 // Remove SPI parameters and add UART parameters
 localparam CLK_FREQ = FREQ;
@@ -73,9 +76,9 @@ assign overlay = overlay_reg;
 reg [15:0] osd_key=16'h0084;
 reg osd_release=1;
 reg [1:0] osd_visible_sync=0;
-wire osd_chord=SUPPORT_RESTART ?
-    (((joy1&12'h084)==12'h084)||((joy1&12'h044)==12'h044)||
-     ((hid1&16'h0084)==16'h0084)||((hid1&16'h0044)==16'h0044)) :
+// Reserve both chords from P1, including extra held buttons. P2 cannot open OSD.
+wire osd_chord=(SUPPORT_CRT||SUPPORT_RESTART) ? (((joy1&12'h084)==12'h084)||((joy1&12'h044)==12'h044)||
+               ((hid1&16'h0084)==16'h0084)||((hid1&16'h0044)==16'h0044)) :
     ((joy1==osd_key)||(joy2==osd_key)||(hid1==osd_key)||(hid2==osd_key));
 assign osd_input_block=overlay_reg||osd_release||osd_chord||osd_visible_sync[1];
 always @(posedge clk) begin
@@ -167,6 +170,8 @@ reg [7:0] cursor_y;
 reg [7:0] response_type;
 reg response_req;
 reg response_ack;
+reg queued_response_valid;
+reg [7:0] queued_response_type;
 
 // mgmt_* multiplex
 reg mgmt_rx;
@@ -202,6 +207,7 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x0b addr[15:0] data[15:0] write to disk management interface (mgmt_address and mgmt_writedata)
 // 0x0c <scancode>            send PS/2 scancode (len specified by frame header)
 // 0x0d <string>              debug printf. core ignores this.
+// 0x12                       query frame-applied core_config (CRTSTG1 only)
 //
 // Response payloads from FPGA to BL616:
 // 0x01 core_id[7:0]          core ID
@@ -209,12 +215,15 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x03 joy1[15:0] joy2[15:0] every 20ms, send DS2/SNES joypad state to BL616
 // 0x04 lba[15:0] <data_512>  write a sector to disk
 // 0x05 lba[15:0]             read a sector from disk (followed by command 0x0a)
+// 0x12 applied[31:0]         snapshot applied at a frame boundary, big endian
 
 // UART RX: command processing
 always @(posedge clk) begin
     if (!resetn) begin
         osd_window<=32'h0000201c;osd_window_toggle<=0;osd_key<=16'h0084;
         recv_state <= RECV_IDLE;
+        response_req<=0;response_type<=0;
+        queued_response_valid<=0;queued_response_type<=0;
         cmd_reg <= 0;
         data_reg <= 0;
         rom_loading_reg <= 0;
@@ -236,6 +245,13 @@ always @(posedge clk) begin
         fdd_read_finish <= 0;
         mgmt_rx <= 0;
         kbd_data_valid <= 0;
+
+        // TX owns one response slot. Keep a latest pending query separately
+        // while continuing to receive all configuration/OSD/ROM packets.
+        if(queued_response_valid && response_req==response_ack && recv_state!=RECV_RESPONSE_REQ)begin
+            response_type<=queued_response_type;response_req<=~response_req;
+            queued_response_valid<=0;
+        end
 
         case (recv_state)
 
@@ -261,7 +277,7 @@ always @(posedge clk) begin
                 if(SUPPORT_RESTART && len_reg==1 && rx_data==8'h13 &&
                    overlay_reg && rom_loading_reg==0 && restart_count==0)
                     restart_count<=RESTART_CYCLES;
-                if (rx_data == 1 || rx_data == 2) 
+                if (len_reg==1 && (rx_data == 1 || rx_data == 2 || (SUPPORT_CRT && rx_data == 8'h12)))
                     recv_state <= RECV_RESPONSE_REQ;    // request sending core id / config string
                 else if (len_reg > 1)
                     recv_state <= RECV_PARAM;
@@ -280,7 +296,7 @@ always @(posedge clk) begin
                 
                 case (cmd_reg)
                     3: begin
-                        if (data_cnt == 3) begin    // Received 4 bytes
+                        if (len_reg==5 && data_cnt == 3) begin    // Received 4 bytes
                             core_config <= {data_reg[23:0], rx_data};
                         end
                     end
@@ -360,19 +376,19 @@ always @(posedge clk) begin
 
             RECV_RESPONSE_REQ:                      // request to send config string
                 case (cmd_reg)
-                    1,2: begin                      // 1: core ID, 2: config string
-                        response_type <= cmd_reg;
-                        response_req ^= 1;
-                        recv_state <= RECV_RESPONSE_ACK;
+                    1,2,8'h12: begin                      // 1: core ID, 2: config string
+                        if(response_req==response_ack && !queued_response_valid)begin
+                            response_type<=cmd_reg;response_req<=~response_req;
+                        end else begin
+                            queued_response_type<=cmd_reg;queued_response_valid<=1;
+                        end
+                        recv_state <= RECV_IDLE;
                     end
                     default:
                         recv_state <= RECV_IDLE;
                 endcase
 
-            RECV_RESPONSE_ACK:                      // wait for TX to finish
-                if (response_req == response_ack) begin
-                    recv_state <= RECV_IDLE;
-                end
+            RECV_RESPONSE_ACK: recv_state<=RECV_IDLE; // Reserved legacy state; never wait for TX.
         endcase
         
     end
@@ -389,7 +405,9 @@ localparam SEND_FDD_READ = 5;
 localparam SEND_HEADER = 6;
 localparam SEND_DONE = 7;
 
-reg [2:0] send_state, send_state_next;
+localparam SEND_CRT_STATUS=8;
+reg [31:0] crt_status_snapshot;
+reg [3:0] send_state, send_state_next;
 reg [$clog2(STR_LEN+1)-1:0] send_idx;
 localparam JOY_UPDATE_INTERVAL = 50_000_000 / 50; // 20ms interval for 50Hz
 reg [$clog2(JOY_UPDATE_INTERVAL+1)-1:0] joy_timer;
@@ -401,7 +419,7 @@ reg [15:0] resp_frame_len;
 always @(posedge clk) begin
     if (!resetn) begin
         joy_timer <= 0;
-        send_state <= 0;
+        send_state <= 0;response_ack<=0;tx_valid<=0;joy1_reg<=0;joy2_reg<=0;
     end else begin
         tx_valid <= 0;
         mgmt_read <= 0;
@@ -433,7 +451,10 @@ always @(posedge clk) begin
                     mgmt_address_tx <= 16'hf200;    // read {drive, sector}
                     resp_frame_len <= 3;
                 end else if (response_req != response_ack) begin
-                    if (response_type == 2) begin
+                    if(response_type==8'h12)begin
+                        crt_status_snapshot<=crt_config_applied;
+                        send_state_next<=SEND_CRT_STATUS;send_state<=SEND_HEADER;resp_frame_len<=5;
+                    end else if (response_type == 2) begin
                         send_state_next <= SEND_CONFIG_STRING;
                         send_state <= SEND_HEADER;
                         resp_frame_len <= STR_LEN + 1;
@@ -454,7 +475,7 @@ always @(posedge clk) begin
                         1: tx_data <= resp_frame_len[15:8];
                         2: tx_data <= resp_frame_len[7:0];
                         3: begin
-                            tx_data <= send_state_next;
+                            tx_data <= send_state_next==SEND_CRT_STATUS?8'h12:{4'b0,send_state_next};
                             send_state <= send_state_next;
                             send_idx <= 0;
                         end
@@ -484,6 +505,14 @@ always @(posedge clk) begin
                 end
             end
 
+            SEND_CRT_STATUS: begin
+                if(tx_ready && ~tx_valid)begin
+                    tx_data<=crt_status_snapshot[8*(3-send_idx) +: 8];
+                    tx_valid<=1;send_idx<=send_idx+1;
+                    if(send_idx==3)begin send_state<=SEND_IDLE;response_ack<=response_req;end
+                end
+            end
+
             SEND_JOYPAD: begin
                 if (tx_ready && ~tx_valid) begin
                     case (send_idx)
@@ -497,7 +526,6 @@ always @(posedge clk) begin
                     send_idx <= send_idx + 1;
                     if (send_idx == 3) begin
                         send_state <= SEND_IDLE;
-                        response_ack <= response_req;
                     end
                 end
             end

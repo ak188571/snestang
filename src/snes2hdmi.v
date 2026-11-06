@@ -3,7 +3,7 @@
 
 `timescale 1ns / 1ps
 
-module snes2hdmi (
+module snes2hdmi #(parameter CRT_STAGE1=0) (
 	input clk,      // snes clock
 	input resetn,
 
@@ -14,6 +14,9 @@ module snes2hdmi (
     input [14:0] rgb5,
     input [8:0] xs, // {x,dotclk}
     input [8:0] ys, // {field,y}
+
+    input [31:0] core_config,
+    output [31:0] crt_config_applied,
 
     input overlay,
     input [31:0] osd_window,
@@ -272,13 +275,30 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
 
     end
 
+    // Stage1 accepts settings at frame boundaries while the game RGB remains
+    // the exact legacy BGR555-to-RGB888 path. No effect latency or prefetch.
+    wire [31:0] crt_config_active;
+    wire [23:0] game_rgb_raw={mem_portB_rdata[4:0],3'b0,
+        mem_portB_rdata[9:5],3'b0,mem_portB_rdata[14:10],3'b0};
+    wire [23:0] game_rgb_crt;
+    generate if(CRT_STAGE1)begin : crt_stage1
+        tc_crt_config crt_config(.clk(clk),.pclk(clk_pixel),.resetn(resetn),
+            .requested(core_config),.frame_start(cx==0 && cy==0),
+            .active_config(crt_config_active),.applied_config(crt_config_applied));
+        tc_crt_bypass crt(.rgb_in(game_rgb_raw),.rgb_out(game_rgb_crt));
+    end else begin : no_crt
+        assign crt_config_active=0;
+        assign crt_config_applied=0;
+        assign game_rgb_crt=game_rgb_raw;
+    end endgenerate
+
     // calc rgb value to hdmi
     always @(posedge clk_pixel) begin
         if (active) begin
             if (osd_pixel)
                 rgb <= {overlay_color[4:0],3'b0,overlay_color[9:5],3'b0,overlay_color[14:10],3'b0};       // BGR5 to RGB8
             else
-                rgb <= {mem_portB_rdata[4:0], 3'b0, mem_portB_rdata[9:5], 3'b0, mem_portB_rdata[14:10], 3'b0};                
+                rgb <= game_rgb_crt;
         end else
             rgb <= 24'h303030;
     end
