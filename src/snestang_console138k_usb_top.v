@@ -243,6 +243,10 @@ wire pause_snes_for_frame_sync;
 
 wire [7:0] loader_do;
 wire loader_do_valid, loading, header_finished;
+wire game_reset;
+`ifndef MCU_BL616
+assign game_reset=1'b0;
+`endif
 
 reg [22:0] loader_addr = 0;
 
@@ -296,7 +300,7 @@ parameter USE_GSU=0;
 
 `ifndef DISABLE_SNES
 main #(.USE_DSPn(USE_DSPn), .USE_GSU(USE_GSU)) main (
-    .MCLK(mclk), .RESET_N(resetn & ~loading), .ENABLE(enable), 
+    .MCLK(mclk), .RESET_N(resetn & ~loading & ~game_reset), .ENABLE(enable), 
     .SYSCLKF_CE(sysclkf_ce), .SYSCLKR_CE(sysclkr_ce), .REFRESH(refresh),
 
     .ROM_TYPE(rom_type), .ROM_MASK(rom_mask), .RAM_MASK(ram_mask),
@@ -679,7 +683,7 @@ snes2hdmi s2h(
     .tmds_d_n(tmds_d_n), .tmds_d_p(tmds_d_p)
 );
 
-iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000)) iosys (
+iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000), .SUPPORT_RESTART(1)) iosys (
     .clk(mclk), .hclk(hclk), .resetn(resetn),
     .osd_window(osd_window), .osd_window_toggle(osd_window_toggle), .osd_visible(osd_visible),
     .osd_input_block(osd_input_block),
@@ -687,7 +691,7 @@ iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000)) iosys (
     .overlay_color(overlay_color),
     .joy1(joy1_btns_ds2 | joy1_btns_snes | joy1_usb), .joy2(joy2_btns_ds2 | joy2_btns_snes | joy2_usb), .hid1(hid1), .hid2(hid2),
     .uart_tx(UART_TXD), .uart_rx(UART_RXD),
-    .rom_loading(loading), .rom_do(loader_do), .rom_do_valid(loader_do_valid)
+    .game_reset(game_reset), .rom_loading(loading), .rom_do(loader_do), .rom_do_valid(loader_do_valid)
 );
 
 `else       // VERILATOR
