@@ -3,7 +3,7 @@
 
 `timescale 1ns / 1ps
 
-module snes2hdmi #(parameter CRT_STAGE1=0, CRT_BLUR=0) (
+module snes2hdmi #(parameter CRT_STAGE1=0, CRT_BLUR=0, CRT_SCAN=0) (
 	input clk,      // snes clock
 	input resetn,
 
@@ -221,11 +221,52 @@ module snes2hdmi #(parameter CRT_STAGE1=0, CRT_BLUR=0) (
     reg [9:0] cy_r;
     wire [31:0] crt_config_active;
     wire blur_enabled=CRT_STAGE1 && CRT_BLUR && crt_config_active[16] && |crt_config_active[18:17];
+    wire scan_enabled=CRT_STAGE1 && CRT_SCAN && crt_config_active[16] && |crt_config_active[20:19];
     // Current SNES scaler: 256/960 source pixels per output pixel. Three
     // output-pixel lookahead advances at most one source column (carry >=192).
     // Keep the exact original address when blur is inactive, including live writes.
     wire [7:0] xx_three=xx+(xcnt>=11'd192 ? 8'd1 : 8'd0);
-    assign mem_portB_addr = {yy[BUF_WIDTH-1:0], (blur_enabled?xx_three:xx)};
+    // One output-pixel lookahead for scanline without blur: 960-256=704.
+    // The 160-pixel side margin primes the unchanged Y/line-buffer phase.
+    wire [7:0] xx_one=xx+(xcnt>=11'd704 ? 8'd1 : 8'd0);
+    assign mem_portB_addr = {yy[BUF_WIDTH-1:0], (blur_enabled?xx_three:scan_enabled?xx_one:xx)};
+    // Audited SNES path captures only ys[7:0]<224 and scales those 224 rows
+    // over 720 output rows. This describes that existing sampled raster; it
+    // does not add overscan, half-dot or interlaced-field reconstruction.
+    // Each output row spans 224/720 source-row units. Integrate a dark strip
+    // of that width at the end of each sampled row; ycnt is the footprint's
+    // start phase. All reachable phases are multiples of gcd(224,720)=16.
+    function automatic [3:0] sampled_scan_depth(input [10:0] phase,input [1:0] level);
+        reg [5:0] index;
+        reg [4:0] weight;
+        begin
+            index=phase[9:4];
+            if(index<=17)weight=0;
+            else if(index<31)weight=5'(index-17);
+            else weight=5'(45-index);
+            case(level)
+                1:sampled_scan_depth=weight<4?0:weight<11?1:2;
+                2:sampled_scan_depth=weight<2?0:weight<6?1:weight<9?2:weight<13?3:4;
+                3:case(weight)
+                    0:sampled_scan_depth=0;
+                    1,2:sampled_scan_depth=1;
+                    3,4:sampled_scan_depth=2;
+                    5,6:sampled_scan_depth=3;
+                    7:sampled_scan_depth=4;
+                    8,9:sampled_scan_depth=5;
+                    10,11:sampled_scan_depth=6;
+                    12,13:sampled_scan_depth=7;
+                    default:sampled_scan_depth=8;
+                endcase
+                default:sampled_scan_depth=0;
+            endcase
+        end
+    endfunction
+    reg [3:0] scan_depth=0;
+    always @(posedge clk_pixel)begin
+        if(!resetn)scan_depth<=0;
+        else scan_depth<=CRT_SCAN?sampled_scan_depth(ycnt,crt_config_active[20:19]):4'd0;
+    end
     wire osd_pixel;
 tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
     .active(overlay),.window(osd_window),.window_toggle(osd_window_toggle),
@@ -289,13 +330,12 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
         tc_crt_config crt_config(.clk(clk),.pclk(clk_pixel),.resetn(resetn),
             .requested(core_config),.frame_start(cx==0 && cy==0),
             .active_config(crt_config_active),.applied_config(crt_config_applied));
-        if(CRT_BLUR)begin : blur_path
-            // Scanline is not implemented/advertised in S3a. Retain its request
-            // bits in the mailbox but keep them outside the pixel effect path.
+        if(CRT_BLUR || CRT_SCAN)begin : blur_path
             crt_filter crt(.pclk(clk_pixel),.resetn(resetn),
-                .rgb_in(game_rgb_raw),.config_active(crt_config_active & ~32'h00180000),
+                .rgb_in(game_rgb_raw),.config_active(crt_config_active &
+                    (CRT_SCAN?32'hffffffff:~32'h00180000) & (CRT_BLUR?32'hffffffff:~32'h00060000)),
                 .first_pixel(cx==(blur_enabled?XSTART-1:XSTART)),
-                .last_pixel(cx==(blur_enabled?XSTOP-2:XSTOP-1)),.scan_depth(4'd0),
+                .last_pixel(cx==(blur_enabled?XSTOP-2:XSTOP-1)),.scan_depth(scan_depth),
                 .rgb_out(game_rgb_crt));
         end else begin : bypass_path
             tc_crt_bypass crt(.rgb_in(game_rgb_raw),.rgb_out(game_rgb_crt));
