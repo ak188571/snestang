@@ -69,11 +69,21 @@ FPGAはSDRAMの完了を待っている間もFIFOへ次のUART byteを保存す�
 4. ENDでは受信stream CRCに加え、実際のSDRAMを全ROM分読み戻す。headerの受信CRCと読み戻したROMのCRCが一致してからverifiedにする。
 5. 同じ手順で2 Mbit/sへ戻し、LinkSync後にSTARTする。従来のOSD／入力通信は2 Mbit/sで続ける。
 
-DATAのcommitはSDRAM requestのACKと、その後4 mclkの待ちを経て通知する。通信無活動のwatchdogは通常1秒とする。END照合済みの状態だけは12秒とし、送信側がACK消失による10秒timeoutを待った後も同じENDを再送できるようにする。いずれも期限後はUARTを2 Mbit/sへ戻し、未起動ゲームのresetを保持する。backend処理中はidle watchdogを進めず、別の12秒の処理期限を用いる。SDRAMのACK待ちは10 msで失敗、未完了backendは再利用せずresetを要求する。送信側も失敗時はDMAを止め、2 Mbit/sへ戻して通常1.2秒、ENDを試行した後は12.2秒待つ。呼び出し元はmonitorを復元する。
+DATAのcommitは最後のSDRAM requestのACKと、その後4 mclkの回復設定による待ちを経て通知する。連続格納版は中間wordのACK後に次requestを許可し、controllerのcommand scheduleを保つ。通信無活動のwatchdogは通常1秒とする。END照合済みの状態だけは12秒とし、送信側がACK消失による10秒timeoutを待った後も同じENDを再送できるようにする。いずれも期限後はUARTを2 Mbit/sへ戻し、未起動ゲームのresetを保持する。backend処理中はidle watchdogを進めず、別の12秒の処理期限を用いる。SDRAMのACK待ちは10 msで失敗、未完了backendは再利用せずresetを要求する。送信側も失敗時はDMAを止め、2 Mbit/sへ戻して通常1.2秒、ENDを試行した後は12.2秒待つ。呼び出し元はmonitorを復元する。
 
 SNESのstreamは64 byte headerとROM本体を連結する。ROMは偶数byte、最大0x7e0000 byteとし、WRAM領域への侵入を拒否する。FPGAには4096 byteの受信FIFOと1024 byte×3のRAM bank、受信descriptorの保持とACK、clock domain間の2段同期を置く。全clock間を一括でfalse pathにせず、追加の例外は同期第1段、保持descriptorのcapture、reset同期回路の非同期CLEAR端子に限定する。resetの解除は2段で同期し、その段間のD入力への経路は解析対象に残す。
 
 通常のSNES送信は64 byte headerの後に偶数byteのROM blockを送り、DATAごとに全wordの書き込みを待つ。共通層の試験では奇数byteの分割も扱う。この場合だけはword途中の末尾1 byteをSNES adapterに保持してACKし、次のDATAでwordを書き込む。保持したbyteも含めて再送を二重実行せず、ENDでは端数が残っていないことと、全ROMの実SDRAM照合を要求する。
+
+## 送信中のCPU処理（TC_ROM_CPU_PIPELINE）
+
+`Transport::poll`を追加すると、共通Sessionは送信中のpump内でreply回収、ACKのCRC確認、次frameのコピーとframe CRC、stream CRCを進める。pollは待たずに完全なreplyを1件だけ返し、不完全なreplyはadapterが保持する。UARTのRX ring参照、DMA、物理送信の完了確認はUART adapterに置き、Sessionへ持ち込まない。SPIでも同じpollとsend中のpumpを実装できる。pollがnullの場合は従来の2件管理を使用する。
+
+2枠の状態はEmpty／Prepared／Sentで管理する。最も古い連続ACKだけが枠を解放でき、送信中の枠はACKが届いてもDMAと物理送信が終わるまで固定する。投機的に計算したstream CRCは枠ごとに保存し、連続ACK確定時だけ正式なCRCへ反映する。再送は同じbyte列を使い、CRCと供給元位置を二重に進めない。再送候補の一覧を処理している間は新frameを準備せず、解放後の枠番号を再送へ誤用しない。
+
+`send`は成功・失敗いずれでも送信bufferへのDMA／物理送信参照を停止してから戻る。pumpからsendを再帰呼出ししない。UART adapterは送信開始後とRX到着時にpumpを呼び、ACKの回収後に次frameを用意する。送信は従来どおり8 Mbit/s、Window=2、各request最大4回、ENDでSDRAM全ROM読戻しを要求する。
+
+軽量計測は`TC_ROMXFR1_TRACE_V4`とし、`cpu_pipeline`、`cpu_pumps`、`cpu_prepared`、`cpu_acks`、`cpu_crc`を追加する。後3項目はsend callbackの実行区間中に行った処理の件数であり、DMAの物理的なbusy時間内だけを測った時間値ではない。詳細計測は既定OFFのままにする。
 
 ## SPIへ追加する場合
 
@@ -118,3 +128,23 @@ PC試験は実機の配線品質・電源・BL616割り込み遅延を確定し�
 
 CRC・再送・session・2件の送信管理は共通C++ Sessionと受信RTLに置き、UART固有のDMA・速度設定から分離した。UART固有制御を無効化した同じ処理も試験した。SPIの物理信号は未実装。
 親repositoryの `docs/rom/UART8_OVERLAP_20261108.md` と `verification/uart8-overlap-20261108/` に対応commit、配布物、検証範囲と計測記録を収録する。flash全体・microSDコピー・ゲームROMは公開物に含めない。
+
+## 通常版の実機確認・公開（2026年11月8日）
+
+共通tag `uart8-cpu-overlap-hw-20261108`、統合先 `tangcore-integrated`。
+軽量計測と詳細計測をともにOFFにした通常版を適用し、BOOT再接続後の独立した全flash読戻しで
+firmwareと対象外領域の一致を確認した。利用者は2 MiB・4 MiBの2本とも
+起動・下段の準備／転送／照合表示・一覧復帰を正常と確認した。
+通常版の転送時間・タイトル到達時間は再計時していない。
+
+- 通常版firmware: 241472 byte、SHA-256 `fa0e48157191afb19be3ac7ecfbaf4ffd0d00cefcda9bf6294b6f5700c4ec0eb`。
+- 通常版全flash SHA-256: `7b0e1a58807062ae3e786cefe11da94395fefdda8f3a81538bce35f29ba432f5`。
+- SNES core: 4767636 byte、SHA-256 `ca489a5fe2696716d58dc968854ed1bfb75d67b37365b68b5c3f1f88e218e191`。通常版切替時に変更なし。
+- 切替前のmicroSD 91 user filesを保存・照合し、実行後も全ファイルの内容・属性・mtimeが一致。sector imageではない。
+- 軽量計測版での改善: 2 MiB 3.286302→2.723655秒（17.12%）、4 MiB 6.564648→5.432306秒（17.25%）。各条件1回。
+- ENDは0.487768／0.975417秒、CRCはc287a01c／21e24729、再送は両方0回。
+- SPIの共用C++／RTLは検証済み、物理SPIは未実装。
+
+親repositoryの `docs/rom/UART8_CPU_OVERLAP_20261108.md` と
+`verification/uart8-cpu-overlap-20261108/` に配布物・対応commit・確認結果を記録する。
+flash全体・SDコピー・ゲームROMは公開物へ含めない。

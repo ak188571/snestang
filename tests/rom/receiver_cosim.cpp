@@ -28,24 +28,30 @@ struct Test {
     std::set<unsigned> lost_ack;
     static bool send_frame(void *p,const std::uint8_t *request,std::size_t size,std::uint32_t,void (*pump)(void *),void *ctx){
         auto &s=*static_cast<Test*>(p);++s.send_calls;
+        const std::vector<std::uint8_t> immutable(request,request+size);
         std::vector<std::uint8_t> frame(request,request+size);
         if(s.fault_mode==1&&!s.injected&&get32(request+10)==0){frame[20]^=1;s.injected=true;}
-        for(auto b:frame){s.dut.rx_data=b;s.dut.rx_valid=1;s.step();s.dut.rx_valid=0;s.step();}
+        unsigned i=0;
+        for(auto b:frame){s.dut.rx_data=b;s.dut.rx_valid=1;s.step();s.dut.rx_valid=0;s.step();
+            if(pump&&++i%16==0){pump(ctx);assert(std::equal(immutable.begin(),immutable.end(),request));}}
         if(pump)pump(ctx);return true;
+    }
+    static bool poll_frame(void *p,std::uint8_t *reply,std::size_t *size){
+        auto &s=*static_cast<Test*>(p);
+        while(s.received.size()>=25){
+            assert(*size>=25);for(unsigned j=0;j<25;++j){reply[j]=s.received.front();s.received.pop_front();}*size=25;
+            const auto seq=get32(reply+10);
+            if((s.fault_mode==2&&seq==0)||(s.fault_mode==4&&seq<2)){if(s.lost_ack.insert(seq).second)continue;}
+            if(s.fault_mode==3&&!s.injected){reply[24]^=1;s.injected=true;}
+            if(s.fault_mode==5)continue;
+            return true;
+        }
+        return false;
     }
     static bool receive_frame(void *p,std::uint8_t *reply,std::size_t *size,std::uint32_t){
         auto &s=*static_cast<Test*>(p);++s.receive_calls;
         for(unsigned i=0;i<2500000;++i){
-            if(s.received.size()>=25){
-                assert(*size>=25);for(unsigned j=0;j<25;++j){reply[j]=s.received.front();s.received.pop_front();}*size=25;
-                const auto seq=get32(reply+10);
-                if((s.fault_mode==2&&seq==0)||(s.fault_mode==4&&seq<2)){
-                    if(s.lost_ack.insert(seq).second)continue;
-                }
-                if(s.fault_mode==3&&!s.injected){reply[24]^=1;s.injected=true;}
-                if(s.fault_mode==5)continue;
-                return true;
-            }
+            if(poll_frame(p,reply,size))return true;
             s.step();
         }
         return false;
@@ -159,7 +165,7 @@ int main(int argc,char **argv){
     for(unsigned bytes:{1024u,4096u,2u*1024*1024,4u*1024*1024}){
         for(unsigned fault=0;fault<(bytes==4096?6u:1u);++fault){
             auto t=std::make_unique<Test>();SourceData input(bytes);std::array<std::uint8_t,2*MaxFrame> buffer{};
-            Session s({t.get(),Test::exchange,Test::send_frame,Test::receive_frame},70+fault,buffer.data(),buffer.size());
+            Session s({t.get(),Test::exchange,Test::send_frame,Test::receive_frame,nullptr,Test::poll_frame},70+fault,buffer.data(),buffer.size());
             assert(s.begin(input.bytes.size()));assert(s.negotiate_window());t->fault_mode=fault;
             if(fault==5){assert(!s.stream({&input,SourceData::read,nullptr}));assert(s.stats().requests<=10);assert(t->dut.held);continue;}
             assert(s.stream({&input,SourceData::read,nullptr}));assert(s.finish()&&s.start());
@@ -171,7 +177,7 @@ int main(int argc,char **argv){
     }
     {
         auto t=std::make_unique<Test>();SourceData input(4096);input.chunk=65;std::array<std::uint8_t,2*MaxFrame> buffer{};
-        Session s({t.get(),Test::exchange,Test::send_frame,Test::receive_frame},91,buffer.data(),buffer.size());
+        Session s({t.get(),Test::exchange,Test::send_frame,Test::receive_frame,nullptr,Test::poll_frame},91,buffer.data(),buffer.size());
         assert(s.begin(input.bytes.size())&&s.negotiate_window());assert(s.stream({&input,SourceData::read,nullptr}));
         const unsigned seq=(input.bytes.size()-1)/65-1,at=seq*65;
         auto changed=std::vector<std::uint8_t>(input.bytes.begin()+at,input.bytes.begin()+at+65);changed[0]^=1;
@@ -191,7 +197,7 @@ int main(int argc,char **argv){
     }
     for(unsigned fault=0;fault<3;++fault){
         auto t=std::make_unique<Test>();SourceData input(4096);std::array<std::uint8_t,2*MaxFrame> buffer{};
-        Session s({t.get(),Test::exchange,Test::send_frame,Test::receive_frame},95+fault,buffer.data(),buffer.size());
+        Session s({t.get(),Test::exchange,Test::send_frame,Test::receive_frame,nullptr,Test::poll_frame},95+fault,buffer.data(),buffer.size());
         assert(s.begin(input.bytes.size())&&s.negotiate_window());
         if(fault==0){t->dut.stall_memory=1;assert(!s.stream({&input,SourceData::read,nullptr}));}
         if(fault==1){assert(s.stream({&input,SourceData::read,nullptr}));t->dut.corrupt_read=1;assert(!s.finish());}
