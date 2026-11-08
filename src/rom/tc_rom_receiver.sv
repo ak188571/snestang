@@ -1,5 +1,5 @@
-// ROMXFR1 byte-stream transaction engine. No UART pins, DMA or SPI timing.
-// Two banks keep the last committed DATA exact for idempotent retries.
+// Transport-independent ingress and transaction engine. Capture the next
+// request while the previous CRC-checked block is being committed to SDRAM.
 module tc_rom_receiver #(
     parameter integer CLOCK_HZ=96000000,
     parameter integer MAX_TOTAL=8388672,
@@ -13,16 +13,84 @@ module tc_rom_receiver #(
     output wire owned,hold_reset,processing,end_verified,
     output logic activity,
     // A held descriptor and acknowledged toggle cross to the core adapter.
+    output wire sink_req,
+    output wire [7:0] sink_op,
+    output wire [31:0] sink_offset,sink_total,sink_digest,
+    output wire [10:0] sink_count,
+    output wire [1:0] sink_bank,
+    input logic sink_done,sink_ok,
+    input logic mem_clk,input logic [1:0] mem_bank,input logic [9:0] mem_address,
+    output wire [7:0] mem_data
+);
+
+    // Two in-flight 1048-byte DATA requests fit even while the executor waits
+    // for SDRAM. Overflow poisons the session; no byte is silently dropped.
+    logic [7:0] fifo[0:4095];
+    logic [11:0] wr=0,rd=0;
+    logic [12:0] used=0;
+    logic [7:0] queued_byte=0;
+    logic pending=0,cooldown=0,overflow=0;
+    wire ready,engine_owned,engine_activity;
+    wire take=ready&&!pending&&!cooldown&&used!=0;
+    wire full=used==4096;
+    wire fault=transport_fault||overflow;
+    wire consume=pending&&ready;
+    // Unrelated legacy bytes also pass this ingress. Queue occupancy must not
+    // pause the legacy parser before a valid ROM transaction claims the link.
+    assign owned=engine_owned;
+    always_ff @(posedge clk)begin
+        if(rx_valid&&!full)fifo[wr]<=rx_data;
+        if(take)queued_byte<=fifo[rd];
+        if(!resetn||fault)begin wr<=0;rd<=0;used<=0;pending<=0;cooldown<=0;overflow<=0;end
+        else begin
+            cooldown<=consume;
+            if(rx_valid&&full)overflow<=1;
+            if(rx_valid&&!full)wr<=wr+1'b1;
+            if(take)begin rd<=rd+1'b1;pending<=1;end
+            if(consume)pending<=0;
+            case({rx_valid&&!full,take})
+                2'b10:used<=used+1'b1;
+                2'b01:used<=used-1'b1;
+                default:;
+            endcase
+        end
+    end
+    assign activity=engine_activity||rx_valid;
+    tc_rom_executor #(.CLOCK_HZ(CLOCK_HZ),.MAX_TOTAL(MAX_TOTAL),.LINK_CONTROL(LINK_CONTROL)) executor(
+        .clk(clk),.resetn(resetn),.transport_fault(fault),.rx_data(queued_byte),.rx_valid(consume),
+        .rx_ready(ready),.tx_data(tx_data),.tx_valid(tx_valid),.tx_ready(tx_ready),.tx_idle(tx_idle),
+        .link_at_base(link_at_base),.link_available(link_available),.rate_pulse(rate_pulse),.rate_value(rate_value),
+        .owned(engine_owned),.hold_reset(hold_reset),.processing(processing),.end_verified(end_verified),.activity(engine_activity),
+        .sink_req(sink_req),.sink_op(sink_op),.sink_offset(sink_offset),.sink_total(sink_total),.sink_digest(sink_digest),
+        .sink_count(sink_count),.sink_bank(sink_bank),.sink_done(sink_done),.sink_ok(sink_ok),
+        .mem_clk(mem_clk),.mem_bank(mem_bank),.mem_address(mem_address),.mem_data(mem_data));
+endmodule
+
+// ROMXFR1 byte-stream transaction engine. No UART pins, DMA or SPI timing.
+// Three banks retain the last two committed DATA blocks and one candidate.
+module tc_rom_executor #(
+    parameter integer CLOCK_HZ=96000000,
+    parameter integer MAX_TOTAL=8388672,
+    parameter bit LINK_CONTROL=1
+)(
+    input logic clk,resetn,transport_fault,
+    input logic [7:0] rx_data,input logic rx_valid,output wire rx_ready,
+    output logic [7:0] tx_data,output wire tx_valid,input logic tx_ready,tx_idle,
+    input logic link_at_base,link_available,
+    output logic rate_pulse,output logic [31:0] rate_value,
+    output wire owned,hold_reset,processing,end_verified,
+    output logic activity,
+    // A held descriptor and acknowledged toggle cross to the core adapter.
     output logic sink_req=0,
     output logic [7:0] sink_op=0,
     output logic [31:0] sink_offset=0,sink_total=0,sink_digest=0,
     output logic [10:0] sink_count=0,
-    output logic sink_bank=0,
+    output logic [1:0] sink_bank=0,
     input logic sink_done,sink_ok,
-    input logic mem_clk,mem_bank,input logic [9:0] mem_address,
+    input logic mem_clk,input logic [1:0] mem_bank,input logic [9:0] mem_address,
     output wire [7:0] mem_data
 );
-    localparam [7:0] BEGIN_OP=1,DATA_OP=2,END_OP=3,START_OP=4,ABORT_OP=5,RATE_OP=16,SYNC_OP=17;
+    localparam [7:0] BEGIN_OP=1,DATA_OP=2,END_OP=3,START_OP=4,ABORT_OP=5,WINDOW_OP=6,RATE_OP=16,SYNC_OP=17;
     localparam [7:0] OK=0,FORMAT=1,SESSION=2,ORDER=3,RANGE=4,STATE=5,INTEGRITY=7,BACKEND=8;
     localparam [2:0] IDLE=0,RECEIVING=1,VERIFIED=2,RUNNING=3,ABORTED=4;
     localparam [2:0] RECEIVE=0,EXECUTE=1,REPLYING=2,DRAIN=3,VALIDATE=4;
@@ -77,23 +145,31 @@ module tc_rom_receiver #(
         rate_base<=arg==2000000;rate_supported<=arg==2000000||arg==8000000;
     end
 
-    logic incoming_bank=0,last_bank=1,last_valid=0,same_last=1;
+    logic [1:0] incoming_bank=0,last_bank=1,prev_bank=2;
+    logic last_valid=0,same_last=1,prev_valid=0,same_prev=1;
+    logic [31:0] prev_sequence=0,prev_offset=0;
+    logic [15:0] prev_count=0;
+    logic previous_ok=0;
+    always_ff @(posedge clk) previous_ok<=prev_valid&&req_sequence==prev_sequence&&offset==prev_offset&&count==prev_count&&same_prev;
     logic [31:0] last_sequence=0,last_offset=0;
     logic [15:0] last_count=0;
-    logic [7:0] ram0[0:1023],ram1[0:1023];
-    logic [7:0] fast0,fast1,slow0,slow1;
+    logic [7:0] ram0[0:1023],ram1[0:1023],ram2[0:1023];
+    logic [7:0] fast0,fast1,fast2,slow0,slow1,slow2;
     wire [9:0] payload_address=position>=20?position-20:0;
     wire store=mode==RECEIVE && rx_valid && !skip_left && command==8'h30 && position>=20 && position<20+count && count<=1024;
     always_ff @(posedge clk)begin
         // GW5AST DPB supports write-through/no-change, not read-before-write.
         // The bank being written is never the duplicate-comparison bank.
-        if(store&&!incoming_bank)begin ram0[payload_address]<=rx_data;fast0<=rx_data;end
+        if(store&&incoming_bank==0)begin ram0[payload_address]<=rx_data;fast0<=rx_data;end
         else fast0<=ram0[payload_address];
-        if(store&&incoming_bank)begin ram1[payload_address]<=rx_data;fast1<=rx_data;end
+        if(store&&incoming_bank==1)begin ram1[payload_address]<=rx_data;fast1<=rx_data;end
         else fast1<=ram1[payload_address];
+        if(store&&incoming_bank==2)begin ram2[payload_address]<=rx_data;fast2<=rx_data;end
+        else fast2<=ram2[payload_address];
     end
-    always_ff @(posedge mem_clk)begin slow0<=ram0[mem_address];slow1<=ram1[mem_address];end
-    assign mem_data=mem_bank?slow1:slow0;
+    always_ff @(posedge mem_clk)begin slow0<=ram0[mem_address];slow1<=ram1[mem_address];slow2<=ram2[mem_address];end
+    assign mem_data=mem_bank==2?slow2:mem_bank==1?slow1:slow0;
+    assign rx_ready=mode==RECEIVE;
     function automatic [31:0] crc_byte(input [31:0] initial_crc,input [7:0] value);
         reg [31:0] c;
         begin c=initial_crc^value;for(integer bitno=0;bitno<8;bitno=bitno+1)c=(c>>1)^((c&1)?32'hedb88320:0);crc_byte=c;end
@@ -141,7 +217,7 @@ module tc_rom_receiver #(
             mode<=RECEIVE;session_state<=IDLE;session_id<=0;next_offset<=0;next_sequence<=0;remaining<=0;
             position<=0;skip_left<=0;byte_timer<=0;sink_req<=0;done_sync<=0;
             reading_crc<=0;payload_active<=0;payload_left<=0;
-            stream_crc<=32'hffffffff;last_valid<=0;incoming_bank<=0;last_bank<=1;
+            stream_crc<=32'hffffffff;last_valid<=0;prev_valid<=0;incoming_bank<=0;last_bank<=1;prev_bank<=2;
             rate_pending<=0;link_confirmed<=1;exec_timer<=0;backend_poisoned<=0;
         end else if(transport_fault)begin
             if(mode==EXECUTE)backend_poisoned<=1;
@@ -170,7 +246,7 @@ module tc_rom_receiver #(
                     end else if(session_state!=IDLE&&session_state!=ABORTED)reply(STATE,next_offset);
                     else begin
                         session_id<=rid;total<=arg;remaining<=arg;next_offset<=0;next_sequence<=0;
-                        stream_crc<=32'hffffffff;last_valid<=0;session_state<=RECEIVING;link_confirmed<=1;
+                        stream_crc<=32'hffffffff;last_valid<=0;prev_valid<=0;session_state<=RECEIVING;link_confirmed<=1;
                         execute_sink(BEGIN_OP);sink_total<=arg;
                     end
                 end else if(!same_session)reply(SESSION,next_offset);
@@ -179,10 +255,15 @@ module tc_rom_receiver #(
                     else begin session_state<=ABORTED;reply(OK,next_offset);end
                 end else if(op==DATA_OP)begin
                     if(session_state!=RECEIVING||!link_confirmed)reply(STATE,next_offset);
-                    else if(duplicate_ok)reply(OK,next_offset);
+                    else if(duplicate_ok||previous_ok)reply(OK,offset+count);
                     else if(!ordered_request)reply(ORDER,next_offset);
                     else if(!data_range_ok)reply(RANGE,next_offset);
                     else execute_sink(DATA_OP);
+                end else if(op==WINDOW_OP)begin
+                    if(!control_body||!ordered_request)reply(FORMAT,next_offset);
+                    else if(session_state!=RECEIVING||!at_start||!link_confirmed)reply(STATE,next_offset);
+                    else if(arg!=2)reply(RANGE,next_offset);
+                    else reply(OK,next_offset);
                 end else if(op==END_OP)begin
                     if(!control_body||!ordered_request)reply(FORMAT,next_offset);
                     else if(!end_digest_ok||!stream_complete)reply(INTEGRITY,next_offset);
@@ -213,8 +294,9 @@ module tc_rom_receiver #(
                         BEGIN_OP:reply(OK,0);
                         DATA_OP:begin
                             next_offset<=next_offset+count;remaining<=remaining-count;next_sequence<=sequence_successor;stream_crc<=candidate_crc;
+                            prev_valid<=last_valid;prev_sequence<=last_sequence;prev_offset<=last_offset;prev_count<=last_count;prev_bank<=last_bank;
                             last_valid<=1;last_sequence<=req_sequence;last_offset<=offset;last_count<=count;
-                            last_bank<=incoming_bank;incoming_bank<=~incoming_bank;
+                            last_bank<=incoming_bank;incoming_bank<=prev_bank;
                             reply(OK,next_offset+count);
                         end
                         END_OP:begin session_state<=VERIFIED;reply(OK,next_offset);end
@@ -239,7 +321,7 @@ module tc_rom_receiver #(
                     if(skip_left!=0)begin skip_left<=skip_left-1'b1;if(skip_left==1)position<=0;end
                     else if(position==0)begin
                         if(rx_data==8'haa)begin
-                            position<=1;frame_crc<=crc_byte(32'hffffffff,rx_data);same_last<=1;arg<=0;received_crc<=0;
+                            position<=1;frame_crc<=crc_byte(32'hffffffff,rx_data);same_last<=1;same_prev<=1;arg<=0;received_crc<=0;
                             reading_crc<=0;payload_active<=0;
                         end
                     end else begin
@@ -272,7 +354,8 @@ module tc_rom_receiver #(
                                     if(position>=20&&position<20+count&&count<=1024)begin
                                         if(position<24)arg<={arg[23:0],rx_data};
                                         if(op==DATA_OP)candidate_crc<=crc_byte(candidate_crc,rx_data);
-                                        if(last_valid&&rx_data!=(last_bank?fast1:fast0))same_last<=0;
+                                        if(last_valid&&rx_data!=(last_bank==2?fast2:last_bank==1?fast1:fast0))same_last<=0;
+                                        if(prev_valid&&rx_data!=(prev_bank==2?fast2:prev_bank==1?fast1:fast0))same_prev<=0;
                                     end
                                 end
                             endcase

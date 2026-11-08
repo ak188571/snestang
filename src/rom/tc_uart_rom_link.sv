@@ -5,8 +5,8 @@ module tc_uart_rom_link #(parameter integer CLOCK_HZ=80000000)(
     output wire legacy_hold,game_hold,
     output wire sink_req,output wire [7:0] sink_op,
     output wire [31:0] sink_offset,sink_total,sink_digest,
-    output wire [10:0] sink_count,output wire sink_bank,
-    input logic sink_done,sink_ok,mem_clk,mem_bank,
+    output wire [10:0] sink_count,output wire [1:0] sink_bank,
+    input logic sink_done,sink_ok,mem_clk,input logic [1:0] mem_bank,
     input logic [9:0] mem_address,output wire [7:0] mem_data
 );
     logic fast=0,flush=0,fault=0;

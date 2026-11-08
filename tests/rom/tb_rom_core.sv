@@ -6,7 +6,8 @@ module tb_rom_core #(parameter bit LINK_CONTROL=1)(
     output wire [4:0] display_status,output wire held,owned,output wire [31:0] writes,headers,
     output wire [15:0] first_word
 );
-    wire req,done,ok,bank,rd_bank,bus_owner,breq,bwe,hreset,hvalid;
+    wire [1:0] bank,rd_bank;
+    wire req,done,ok,bus_owner,breq,bwe,hreset,hvalid;
     wire [7:0] operation,mem_data,hdata;
     wire [31:0] offset,total,digest;
     wire [10:0] count;

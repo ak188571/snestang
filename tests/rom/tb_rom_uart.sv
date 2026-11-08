@@ -2,12 +2,13 @@ module tb_rom_uart(
     input logic clk,mem_clk,resetn,uart_rx,
     output wire uart_tx,
     input logic stall_memory,corrupt_read,
-    output wire held,owned,at_fast,observed_valid,observed_error,
+    output wire held,owned,at_fast,observed_valid,observed_error,sink_processing,
     output wire [7:0] observed_byte,
     output wire [31:0] writes,headers,
     output wire [15:0] first_word
 );
-    wire req,done,ok,bank,rd_bank,bus_owner,breq,bwe,hreset,hvalid;
+    wire [1:0] bank,rd_bank;
+    wire req,done,ok,bus_owner,breq,bwe,hreset,hvalid;
     wire [7:0] operation,mem_data,hdata;
     wire [31:0] offset,total,digest;
     wire [10:0] count;
@@ -15,6 +16,7 @@ module tb_rom_uart(
     wire [21:0] baddr;
     wire [15:0] bdata;
     logic back=0;logic [15:0] brdata=0;
+    assign sink_processing=link.processing;
     assign at_fast=link.fast;
     assign observed_valid=link.rx_valid;
     assign observed_error=link.rx_error;

@@ -16,6 +16,7 @@ struct Test {
     std::deque<std::uint8_t> received;
     std::vector<std::uint8_t> observed;
     unsigned observed_errors=0;
+    std::uint64_t cycles=0,overlap=0;
     unsigned sender_scale=10000,sender_fraction=0;
     unsigned phase=0,period=SlowPeriod,rx_state=0,rx_left=0,rx_bit=0;
     std::uint8_t rx_byte=0;
@@ -24,6 +25,7 @@ struct Test {
         step(40);dut.resetn=1;step(40);}
     void step(unsigned n=1){
         while(n--){
+            ++cycles;if(dut.observed_valid&&dut.sink_processing)++overlap;
             dut.clk=0;dut.eval();
             phase+=42968000;if(phase>=Clock){phase-=Clock;dut.mem_clk=!dut.mem_clk;}
             dut.clk=1;dut.eval();
@@ -62,6 +64,23 @@ struct Test {
         if(s.lose_rate&&request[5]==16){s.lose_rate=false;s.step(Clock/20);return false;}
         return true;
     }
+    static bool send_frame(void *p,const std::uint8_t *request,std::size_t size,std::uint32_t,void (*pump)(void *),void *ctx){
+        auto &s=*static_cast<Test*>(p);
+        for(unsigned i=0;i<size;++i){auto b=request[i];if(s.damage&&i==23){b^=1;s.damage=false;}s.send(b);}
+        if(pump)pump(ctx);return true;
+    }
+    static bool receive_frame(void *p,std::uint8_t *reply,std::size_t *size,std::uint32_t timeout){
+        auto &s=*static_cast<Test*>(p);const auto limit=std::uint64_t(timeout)*(Clock/1000);
+        for(std::uint64_t i=0;i<limit;++i){
+            if(s.received.size()>=25){
+                assert(*size>=25);for(unsigned j=0;j<25;++j){reply[j]=s.received.front();s.received.pop_front();}*size=25;
+                if(s.lose_data&&get32(reply+10)==0){s.lose_data=false;continue;}
+                return true;
+            }
+            s.step();
+        }
+        return false;
+    }
     void change(unsigned p){step(Clock*6/1000);period=p;assert(bool(dut.at_fast)==(p==FastPeriod));}
 };
 struct Input {
@@ -86,6 +105,29 @@ int main(int argc,char **argv){
         assert(session.link_rate(2000000));t->change(SlowPeriod);assert(session.link_sync());
         assert(session.start());assert(!t->dut.held&&t->dut.writes==8192&&t->dut.headers==64);
         std::puts("Serial 2 -> 8 -> 2 Mbit/s: continuous 8N1, 16 KiB, CRC damage, lost DATA/END ACK with full 50 ms/10 s timeout, SDRAM readback and START passed");std::fflush(stdout);
+    }
+
+    std::uint64_t elapsed[2]{};
+    for(unsigned window=0;window<2;++window){
+        auto t=std::make_unique<Test>();Input input(65536);std::array<std::uint8_t,2*MaxFrame> buffer{};
+        Session s({t.get(),Test::exchange,Test::send_frame,Test::receive_frame},60+window,buffer.data(),buffer.size());
+        assert(s.begin(input.data.size())&&s.link_rate(8000000));t->change(FastPeriod);assert(s.link_sync());
+        if(window)assert(s.negotiate_window());
+        const auto begin=t->cycles;assert(s.stream({&input,Input::read,nullptr}));elapsed[window]=t->cycles-begin;
+        if(window)assert(t->overlap>0);
+        assert(s.finish()&&s.link_rate(2000000));t->change(SlowPeriod);assert(s.link_sync()&&s.start());
+        assert(t->dut.writes==32768&&t->dut.headers==64);
+    }
+    assert(elapsed[1]<elapsed[0]);
+    std::printf("UART8 serial 64KiB DATA-ACK cycles: stop_wait=%llu window2=%llu reduction=%.2f%%\n",
+        (unsigned long long)elapsed[0],(unsigned long long)elapsed[1],100.0*(elapsed[0]-elapsed[1])/elapsed[0]);
+    {
+        auto t=std::make_unique<Test>();Input input(8192);std::array<std::uint8_t,2*MaxFrame> buffer{};
+        Session s({t.get(),Test::exchange,Test::send_frame,Test::receive_frame},62,buffer.data(),buffer.size());
+        assert(s.begin(input.data.size())&&s.link_rate(8000000));t->change(FastPeriod);assert(s.link_sync()&&s.negotiate_window());
+        t->damage=t->lose_data=true;assert(s.stream({&input,Input::read,nullptr}));assert(s.stats().retries>0);
+        assert(s.finish()&&s.link_rate(2000000));t->change(SlowPeriod);assert(s.link_sync()&&s.start());
+        assert(t->dut.writes==4096);std::puts("UART8 window2: damaged DATA plus lost oldest ACK passed");
     }
     {
         auto t=std::make_unique<Test>();Input input(1024);std::array<std::uint8_t,MaxFrame> buffer{};

@@ -115,8 +115,8 @@ set_false_path -to [get_pins {
 }]
 set_false_path -to [get_regs {
  rom_link/phy/rx_sync_0_s0
- rom_link/engine/done_sync_0_s0
- rom_link/engine/ok_sync0_s0
+ rom_link/engine/executor/done_sync_0_s0
+ rom_link/engine/executor/ok_sync0_s0
  rom_sink/req_sync_0_s0
  rom_sink/ack_sync_0_s0
  iosys/transport_hold_sync_0_s0
@@ -129,7 +129,8 @@ set_false_path -to [get_regs {
  rom_sink/requested_total_*
  rom_sink/digest_hold_*
  rom_sink/count_hold_*
- rom_sink/block_bank_s0
+ rom_sink/block_bank_0_s0
+ rom_sink/block_bank_1_s0
 }]
 
 # CRT stage1 acknowledged frame-boundary mailbox.
