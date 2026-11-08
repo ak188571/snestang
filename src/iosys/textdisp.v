@@ -1,7 +1,8 @@
 // 32x28 text display in 8x8 font, with a picorv32 register I/O interface
 // to print characters to the display.
 
-module textdisp(
+module textdisp #(parameter SHOW_LOGO=1, parameter [14:0] COLOR_LOGO=15'b00000_10011_11111,
+    parameter LOAD_STATUS=0)(
 	input             clk,              // main logic clock
     input             hclk,             // hdmi clock
 	input             resetn,
@@ -14,7 +15,9 @@ module textdisp(
     // PicoRV32 I/O interface. Every write updates one character
     // [23:16]: x, [15:8]: y, [7-0]: character to print
 	input      [3:0]  reg_char_we,
-	input      [31:0] reg_char_di
+	input      [31:0] reg_char_di,
+    input             load_row,
+    input      [7:0]  load_char
 );
 
 // BGR
@@ -22,9 +25,6 @@ localparam [14:0] COLOR_BACK    = 15'b00000_00000_00000;
 localparam [14:0] COLOR_TEXT    = 15'b10000_11111_11111;    // yellow
 //localparam [14:0] COLOR_TEXT    = 15'b11000_11000_11000;    // white
 localparam [14:0] COLOR_CURSOR  = 15'b10000_11000_11111;    // orange
-parameter SHOW_LOGO=1;
-// parameter [14:0] COLOR_LOGO    = 15'b00000_10101_00000;    // green
-parameter [14:0] COLOR_LOGO    = 15'b00000_10011_11111;   
 
 // 72x14 pixels 1bpp logo
 localparam LOGO_X = 128-36;
@@ -66,6 +66,17 @@ reg [2:0] logo_xoff;
 reg logo_active;
 reg [14:0] color_buf;
 reg [7:0] x_r;
+// Use the same character generator, foreground and scan position as OSD text.
+// Latch the override with the character RAM read. Both supply the following
+// FETCH_FONT cycle, including across the first pixel of a new character.
+reg load_row_q;
+reg [6:0] load_char_q;
+always @(posedge hclk) begin
+    load_row_q<=load_row;
+    load_char_q<=load_char[6:0];
+end
+wire [6:0] font_char = (LOAD_STATUS && load_row_q) ? load_char_q :
+                       (mem_do_b[7] ? 7'h3F : mem_do_b[6:0]);
 
 // Rendering state machine
 reg [2:0] state;
@@ -78,7 +89,7 @@ always @* begin             // address and output logic
     color = color_buf;
     case (state)
     MAIN:           mem_addr_b = {1'b0, y[7:3], x[7:3]};   
-    FETCH_FONT:     mem_addr_b = {1'b1, mem_do_b[7] ? 7'h3F : mem_do_b[6:0], y[2:0]};  
+    FETCH_FONT:     mem_addr_b = {1'b1, font_char, y[2:0]};
     FETCH_LOGO:     mem_addr_b = {4'b0111, logo_addr};
     OUTPUT: begin
         mem_addr_b = {1'b0, y[7:3], x[7:3]};

@@ -100,6 +100,38 @@ set_false_path -to [get_regs {usb_hid_host/fs_to_ls/dst_data_13_s0 usb_hid_host2
 # Explicit PLL output clock, following the existing clk12 output-clock policy.
 create_clock -name clk96 -period 10.416666667 -waveform {0 5.2083333335} [get_nets {clk96}]
 
+# Extra PLL output for the ROM transport; USB remains at clk96/clk12.
+create_clock -name clk80 -period 12.5 -waveform {0 6.25} [get_nets {clk80}]
+
+# ROM transport: only first synchronizer stages and held descriptor captures.
+# The request is synchronized twice before capture; DISPATCH adds a destination
+# cycle. The descriptor and RAM bank remain stable until the returned done.
+# Do not except entire mclk/clk80 domains: ordinary intra-domain paths still time.
+# usb_reset_sync asserts asynchronously and releases through two clk80 stages.
+# Except only its asynchronous CLEAR pins; the stage-to-stage D path stays timed.
+set_false_path -to [get_pins {
+ rom_reset80_release/reset_pipe_0_s0/CLEAR
+ rom_reset80_release/reset_pipe_1_s0/CLEAR
+}]
+set_false_path -to [get_regs {
+ rom_link/phy/rx_sync_0_s0
+ rom_link/engine/done_sync_0_s0
+ rom_link/engine/ok_sync0_s0
+ rom_sink/req_sync_0_s0
+ rom_sink/ack_sync_0_s0
+ iosys/transport_hold_sync_0_s0
+ iosys/uart_rx_r_s0
+ rom_game_hold_sync_0_s1
+}]
+set_false_path -to [get_regs {
+ rom_sink/op_hold_*
+ rom_sink/offset_hold_*
+ rom_sink/requested_total_*
+ rom_sink/digest_hold_*
+ rom_sink/count_hold_*
+ rom_sink/block_bank_s0
+}]
+
 # CRT stage1 acknowledged frame-boundary mailbox.
 
 set_false_path -to [get_regs {s2h/crt_stage1.crt_config/req_sync_0_s0 s2h/crt_stage1.crt_config/ack_sync_0_s0}]
@@ -169,3 +201,6 @@ set_false_path -to [get_regs {
  s2h/crt_stage1.crt_config/applied_config_30_s0
  s2h/crt_stage1.crt_config/applied_config_31_s0
 }]
+
+# Status mailbox: synchronized request/ack and payload held through capture.
+set_false_path -to [get_regs {s2h/load_display.status_cdc/ack_sync_0_s0 s2h/load_display.status_cdc/toggle_sync_0_s0 s2h/load_display.status_cdc/dst_data_*}]

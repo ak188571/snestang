@@ -12,6 +12,7 @@ module iosys_bl616 #(
     parameter [14:0] COLOR_LOGO=15'b00000_10101_00000,
     parameter [15:0] CORE_ID=1,     // 1: nestang, 2: snestang
     parameter SUPPORT_RESTART=0,
+    parameter SUPPORT_ROMXFR=0,
     parameter SUPPORT_BLUR=0,
     parameter SUPPORT_SCAN=0,
     parameter SUPPORT_CRT=0, // Console138K stage1 bypass and frame-applied status
@@ -22,6 +23,7 @@ module iosys_bl616 #(
     // input clk50,                    // 50mhz clock for UART
     input hclk,                     // hdmi clock
     input resetn,
+    input transport_hold, // ignored unless SUPPORT_ROMXFR; legacy parser pauses during ROMXFR1
 
     // OSD display interface
     output overlay,
@@ -31,6 +33,8 @@ module iosys_bl616 #(
     output osd_input_block,
     input [7:0] overlay_x,          // 0-255
     input [7:0] overlay_y,          // 0-223
+    input load_row,
+    input [7:0] load_char,
     output [14:0] overlay_color,    // BGR5
     input [11:0] joy1,              // DS2/SNES joystick 1: (R L X A RT LT DN UP START SELECT Y B)
     input [11:0] joy2,              // DS2/SNES joystick 2
@@ -63,12 +67,20 @@ module iosys_bl616 #(
     output uart_tx
 );
 
-localparam integer STR_LEN = 81 + (SUPPORT_CRT ? 8 : 0) + (SUPPORT_CRT && SUPPORT_BLUR ? 8 : 0) + (SUPPORT_CRT && SUPPORT_BLUR && SUPPORT_SCAN ? 8 : 0) + (SUPPORT_RESTART ? 8 : 0);
-localparam [8*STR_LEN-1:0] CONF_STR = (SUPPORT_CRT && SUPPORT_BLUR && SUPPORT_SCAN) ?
+localparam integer BASE_STR_LEN = 81 + (SUPPORT_CRT ? 8 : 0) + (SUPPORT_CRT && SUPPORT_BLUR ? 8 : 0) + (SUPPORT_CRT && SUPPORT_BLUR && SUPPORT_SCAN ? 8 : 0) + (SUPPORT_RESTART ? 8 : 0);
+localparam [8*BASE_STR_LEN-1:0] BASE_CONF_STR = (SUPPORT_CRT && SUPPORT_BLUR && SUPPORT_SCAN) ?
     (SUPPORT_RESTART ? "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1;CRTBLR1;CRTSCN1;RSTROM1" : "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1;CRTBLR1;CRTSCN1") : (SUPPORT_CRT && SUPPORT_BLUR) ?
     (SUPPORT_RESTART ? "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1;CRTBLR1;RSTROM1" : "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1;CRTBLR1") : SUPPORT_CRT ?
     (SUPPORT_RESTART ? "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1;RSTROM1" : "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1") :
     (SUPPORT_RESTART ? "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;RSTROM1" : "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1");
+
+localparam integer STR_LEN=BASE_STR_LEN+(SUPPORT_ROMXFR?16:0);
+localparam [8*STR_LEN-1:0] CONF_STR=SUPPORT_ROMXFR?{BASE_CONF_STR,";ROMXFR1;UART8M1"}:BASE_CONF_STR;
+reg [1:0] transport_hold_sync=0;
+always @(posedge clk)begin
+    if(!resetn)transport_hold_sync<=0;
+    else transport_hold_sync<={transport_hold_sync[0],SUPPORT_ROMXFR?transport_hold:1'b0};
+end
 
 // Remove SPI parameters and add UART parameters
 localparam CLK_FREQ = FREQ;
@@ -138,7 +150,7 @@ async_transmitter #(
     .clk(clk),
     .TxD(uart_tx),
     .TxD_data(tx_data),
-    .TxD_start(tx_valid),
+    .TxD_start(tx_valid&&!transport_hold_sync[1]),
     .TxD_busy(tx_busy)
 );
 assign tx_ready = ~tx_busy;
@@ -257,7 +269,8 @@ always @(posedge clk) begin
             queued_response_valid<=0;
         end
 
-        case (recv_state)
+        if(transport_hold_sync[1])recv_state<=RECV_IDLE;
+        else case (recv_state)
 
             RECV_IDLE: if (rx_valid && rx_data == 8'hAA) begin
                 recv_state <= RECV_LEN1;
@@ -615,10 +628,11 @@ end
 wire [31:0] reg_char_di = {8'b0, x_wr, y_wr, char_wr};
 wire [3:0] reg_char_we = {4{we}};
 
-textdisp #(.COLOR_LOGO(COLOR_LOGO), .SHOW_LOGO(0)) disp (
+textdisp #(.COLOR_LOGO(COLOR_LOGO), .SHOW_LOGO(0), .LOAD_STATUS(SUPPORT_ROMXFR)) disp (
     .clk(clk), .hclk(hclk), .resetn(resetn),
     .x(overlay_x), .y(overlay_y), .color(overlay_color),
-    .reg_char_di(reg_char_di), .reg_char_we(reg_char_we)
+    .reg_char_di(reg_char_di), .reg_char_we(reg_char_we),
+    .load_row(load_row), .load_char(load_char)
 );
 `endif
 

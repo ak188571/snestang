@@ -128,6 +128,11 @@ if {$dev eq "nano20k"} {
     error "Unknown device $dev"
 }
 
+add_file -type verilog "src/rom/tc_load_label.sv"
+add_file -type verilog "src/rom/tc_uart_phy.sv"
+add_file -type verilog "src/rom/tc_rom_receiver.sv"
+add_file -type verilog "src/rom/tc_snes_rom_sink.sv"
+add_file -type verilog "src/rom/tc_uart_rom_link.sv"
 add_file -type verilog "src/iosys/iosys_bl616.v"
 add_file -type verilog "src/iosys/uart_fractional.v"
 add_file -type verilog "src/iosys/textdisp.v"
@@ -220,5 +225,9 @@ add_file -type verilog "src/iosys/tc_crt_bypass.sv"
 add_file -type verilog "src/iosys/crt_filter.sv"
 
 add_file -type sdc "console138k_combined.sdc"
+if {$argc >= 3 && [lindex $argv 2] eq "incremental"} {
+    # Reuse the routed design for a constraint-only update.
+    set_option -inc_pnr auto
+}
 run syn
 run pnr

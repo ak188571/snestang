@@ -19,7 +19,11 @@ module usb_xusb_enumeration #(
  localparam DEV8=0,ADDRESS=1,DEV18=2,CFG9=3,CFGALL=4,CONFIGURE=5,VENDOR=6;
  reg [3:0] state=IDLE,phase=0;
  assign debug_phase=phase[2:0];
- reg [7:0] memory[0:255];
+ // The descriptor parser needs one synchronous read port. Keep the handful of
+ // fixed header bytes separately so their parallel checks do not fan out the
+ // write enable across 256 banks of flip-flops on the 96 MHz clock.
+ reg [7:0] memory[0:255] /* synthesis syn_ramstyle="block_ram" */;
+ reg [7:0] prefix[0:17];
  reg [7:0] header[0:8];
  reg [3:0] header_index=0;
  // Register descriptor checks before committing any parser state changes.
@@ -31,6 +35,10 @@ module usb_xusb_enumeration #(
  reg [7:0] memory_byte=0;
  always @(posedge clk)memory_byte<=memory[cursor[7:0]+{4'd0,header_index}];
  reg [8:0] count=0,index=0,cursor=0;
+ always @(posedge clk) if(resetn && state==COPY) begin
+    memory[index[7:0]]<=read_value;
+    if(index<18) prefix[index[4:0]]<=read_value;
+ end
  reg [17:0] settle=0;
  reg [15:0] total=0;
  reg [7:0] config_id=0,ep=0,interval=0;
@@ -82,22 +90,21 @@ module usb_xusb_enumeration #(
    end
    COPY_WAIT:state<=COPY;
    COPY:begin
-    memory[index[7:0]]<=read_value;
     if(index+1==count)state<=VALIDATE;
     else begin index<=index+1'b1;state<=COPY_WAIT;end
    end
    VALIDATE:case(phase)
-    DEV8:if(count!=8 || memory[0]!=18 || memory[1]!=1 || memory[7]!=8)fail(8'h0a);
+    DEV8:if(count!=8 || prefix[0]!=18 || prefix[1]!=1 || prefix[7]!=8)fail(8'h0a);
      else begin phase<=ADDRESS;state<=ISSUE;end
     ADDRESS:begin device_address<=1;settle<=0;state<=SETTLE;end
-    DEV18:if(count!=18 || memory[0]!=18 || memory[1]!=1 || memory[7]!=8 || memory[17]!=1 ||
-       {memory[9],memory[8]}!=16'h045e || {memory[11],memory[10]}!=16'h028e)fail(8'h0b);
+    DEV18:if(count!=18 || prefix[0]!=18 || prefix[1]!=1 || prefix[7]!=8 || prefix[17]!=1 ||
+       {prefix[9],prefix[8]}!=16'h045e || {prefix[11],prefix[10]}!=16'h028e)fail(8'h0b);
      else begin phase<=CFG9;state<=ISSUE;end
-    CFG9:if(count!=9 || memory[0]!=9 || memory[1]!=2 || memory[4]!=4 || memory[5]==0 ||
-       {memory[3],memory[2]}<9 || {memory[3],memory[2]}>256)fail(8'h0c);
-     else begin total<={memory[3],memory[2]};config_id<=memory[5];phase<=CFGALL;state<=ISSUE;end
-    CFGALL:if({7'd0,count}!=total || memory[0]!=9 || memory[1]!=2 || memory[4]!=4 || memory[5]!=config_id ||
-       {memory[3],memory[2]}!=total)fail(8'h0c);
+    CFG9:if(count!=9 || prefix[0]!=9 || prefix[1]!=2 || prefix[4]!=4 || prefix[5]==0 ||
+       {prefix[3],prefix[2]}<9 || {prefix[3],prefix[2]}>256)fail(8'h0c);
+     else begin total<={prefix[3],prefix[2]};config_id<=prefix[5];phase<=CFGALL;state<=ISSUE;end
+    CFGALL:if({7'd0,count}!=total || prefix[0]!=9 || prefix[1]!=2 || prefix[4]!=4 || prefix[5]!=config_id ||
+       {prefix[3],prefix[2]}!=total)fail(8'h0c);
      else begin cursor<=0;state<=PARSE;end
     CONFIGURE:if(VENDOR_PROBE!=0)begin phase<=VENDOR;state<=ISSUE;end
      else begin initialization_status<=3;ready<=1;busy<=0;state<=STOP;end

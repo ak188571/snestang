@@ -7,15 +7,16 @@
 //Device Version: B
 //Created Time: Sat Mar 29 15:41:54 2025
 
-module pll_usb (lock, clk12, clk96, clkin);
+module pll_usb (lock, clk12, clk96, clk80, clkin);
 
 output lock;
 output clk12;
 output clk96;
+// Extra output only: 1200 MHz VCO / 15. Existing 96/12 MHz outputs unchanged.
+output clk80;
 input clkin;
 
 
-wire clkout2;
 wire clkout3;
 wire clkout4;
 wire clkout5;
@@ -31,7 +32,7 @@ PLL PLL_inst (
     .LOCK(lock),
     .CLKOUT0(clk96),
     .CLKOUT1(clk12),
-    .CLKOUT2(clkout2),
+    .CLKOUT2(clk80),
     .CLKOUT3(clkout3),
     .CLKOUT4(clkout4),
     .CLKOUT5(clkout5),
@@ -83,7 +84,7 @@ defparam PLL_inst.IDIV_SEL = 1;
 defparam PLL_inst.FBDIV_SEL = 1;
 defparam PLL_inst.ODIV0_SEL = 12;
 defparam PLL_inst.ODIV1_SEL = 100;
-defparam PLL_inst.ODIV2_SEL = 8;
+defparam PLL_inst.ODIV2_SEL = 15;
 defparam PLL_inst.ODIV3_SEL = 8;
 defparam PLL_inst.ODIV4_SEL = 8;
 defparam PLL_inst.ODIV5_SEL = 8;
@@ -93,7 +94,7 @@ defparam PLL_inst.MDIV_FRAC_SEL = 0;
 defparam PLL_inst.ODIV0_FRAC_SEL = 4;
 defparam PLL_inst.CLKOUT0_EN = "TRUE";
 defparam PLL_inst.CLKOUT1_EN = "TRUE";
-defparam PLL_inst.CLKOUT2_EN = "FALSE";
+defparam PLL_inst.CLKOUT2_EN = "TRUE";
 defparam PLL_inst.CLKOUT3_EN = "FALSE";
 defparam PLL_inst.CLKOUT4_EN = "FALSE";
 defparam PLL_inst.CLKOUT5_EN = "FALSE";

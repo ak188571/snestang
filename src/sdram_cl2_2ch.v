@@ -246,6 +246,7 @@ assign bsram_dout = (cycle[4] && oe_latch[0] && port[0] == PORT_BSRAM) ? (ds[0][
 //
 always @(posedge clk) begin
     if (~resetn) begin
+        cpu_req_ack<=0;bsram_req_ack<=0;aram_req_ack<=0;rv_req_ack<=0;
         busy <= 1'b1;
         dq_oen <= 1;
         SDRAM_DQM <= 2'b0;

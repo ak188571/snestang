@@ -244,6 +244,23 @@ wire pause_snes_for_frame_sync;
 wire [7:0] loader_do;
 wire loader_do_valid, loading, header_finished;
 wire game_reset;
+wire rom_bus_owner,rom_mem_req,rom_mem_we,rom_header_reset,rom_header_valid;
+wire [21:0] rom_mem_address;
+wire [15:0] rom_mem_data;
+wire [7:0] rom_header_data;
+wire rom_mem_ack;
+wire rom_reset_mclk;
+`ifdef VERILATOR
+assign rom_bus_owner=0;
+assign rom_mem_req=0;
+assign rom_mem_we=0;
+assign rom_mem_address=0;
+assign rom_mem_data=0;
+assign rom_header_reset=0;
+assign rom_header_valid=0;
+assign rom_header_data=0;
+assign rom_reset_mclk=1;
+`endif
 `ifndef MCU_BL616
 assign game_reset=1'b0;
 `endif
@@ -265,7 +282,7 @@ reg enable; // && ~dbg_break && ~pause;
 reg loaded;
 
 always @(posedge mclk) begin        // wait until memory initialize to start SNES
-    if (~sdram_busy && ~pause_snes_for_frame_sync && loaded)
+    if (~sdram_busy && ~pause_snes_for_frame_sync && loaded && header_finished)
         enable <= 1;
     else 
         enable <= 0;
@@ -378,6 +395,10 @@ assign      O_sdram_clk = fclk_p;
 // Generate SDRAM signals
 always @(posedge mclk) begin
     if (~resetn) begin
+        cpu_req<=0;cpu_we<=0;cpu_port<=0;cpu_ds<=0;cpu_addr<=0;cpu_din<=0;
+    end else if(rom_bus_owner)begin
+        // Match the request phase before handing the CPU port back after START.
+        cpu_req<=rom_mem_req;cpu_we<=0;
     end else begin
         
         // ROM read and load
@@ -474,9 +495,9 @@ sdram_snes sdram(
     .SDRAM_nCAS(O_sdram_cas_n), .SDRAM_CKE(O_sdram_cke), .SDRAM_DQM(O_sdram_dqm), 
 
     // CPU accesses
-    .cpu_addr(cpu_addr[22:1]), .cpu_din(cpu_din), .cpu_port(cpu_port), 
-    .cpu_port0(cpu_port0), .cpu_port1(cpu_port1), .cpu_req(cpu_req), .cpu_req_ack(),
-    .cpu_we(cpu_we), .cpu_ds(cpu_ds),
+    .cpu_addr(rom_bus_owner?rom_mem_address:cpu_addr[22:1]), .cpu_din(rom_bus_owner?rom_mem_data:cpu_din), .cpu_port(rom_bus_owner?1'b0:cpu_port),
+    .cpu_port0(cpu_port0), .cpu_port1(cpu_port1), .cpu_req(rom_bus_owner?rom_mem_req:cpu_req), .cpu_req_ack(rom_mem_ack),
+    .cpu_we(rom_bus_owner?rom_mem_we:cpu_we), .cpu_ds(rom_bus_owner?2'b11:cpu_ds),
 
     // BSRAM accesses
     .bsram_addr(bsram_addr), .bsram_dout(bsram_dout), .bsram_din(bsram_din),
@@ -517,7 +538,7 @@ vram vram(
 
 // Parse 64-byte rom header into rom_type and etc
 smc_parser smc (
-    .clk(mclk), .resetn(resetn & ~(loading & ~loading_r)),
+    .clk(mclk), .resetn(resetn & rom_reset_mclk & ~rom_header_reset & ~(loading & ~loading_r)),
     .rom_d(loader_do), .rom_strb(loader_do_valid), 
     .rom_type(rom_type), .rom_mask(rom_mask), .ram_mask(ram_mask),
     .rom_size(rom_size), .ram_size(ram_size),
@@ -577,7 +598,7 @@ assign joy2_btns_ds2 = 12'h0;
 `endif
 
 `ifdef USB1
-wire clk12,clk96;
+wire clk12,clk96,clk80;
 wire usb_reset96n;
 usb_reset_sync usb_reset96_release (.clk(clk96), .async_resetn(pll_lock_12 && s0), .resetn(usb_reset96n));
 wire pll_lock_12;
@@ -589,7 +610,7 @@ wire [1:0] usb_type;
 wire p1_report;
 wire p1_connected;
 wire p1_auto_start_seen, p1_auto_wdt_seen;
-pll_usb pll12(.clkin(sys_clk), .clk12(clk12), .clk96(clk96), .lock(pll_lock_12));
+pll_usb pll12(.clkin(sys_clk), .clk12(clk12), .clk96(clk96), .clk80(clk80), .lock(pll_lock_12));
 usb_dual_speed_host usb_hid_host (
     .usbclk96(clk96), .usbrst96_n(usb_reset96n), .usbclk(clk12), .usbrst_n(usb_resetn),
     .usb_dm(usb1_dn), .usb_dp(usb1_dp),
@@ -672,8 +693,16 @@ wire [7:0] overlay_y;
 wire [7:0] dbg_dat_out_loader;
 
 wire [31:0] core_config,crt_config_applied;
-snes2hdmi #(.CRT_STAGE1(1), .CRT_BLUR(1), .CRT_SCAN(1)) s2h(
+wire [4:0] rom_display_status;
+wire load_row;
+wire [7:0] load_char;
+`ifdef VERILATOR
+assign rom_display_status=0;
+`endif
+snes2hdmi #(.LOAD_STATUS(1),.CRT_STAGE1(1), .CRT_BLUR(1), .CRT_SCAN(1)) s2h(
     .clk(mclk), .resetn(resetn), .snes_refresh(refresh),
+    .load_status((rom_display_status==1 && header_finished)?5'd0:rom_display_status),
+    .load_row(load_row), .load_char(load_char),
     .core_config(core_config), .crt_config_applied(crt_config_applied),
     .pause_snes_for_frame_sync(pause_snes_for_frame_sync),
     .dotclk(dotclk), .hblank(~hblankn),.vblank(~vblankn),.rgb5(rgb_out),
@@ -687,17 +716,54 @@ snes2hdmi #(.CRT_STAGE1(1), .CRT_BLUR(1), .CRT_SCAN(1)) s2h(
     .tmds_d_n(tmds_d_n), .tmds_d_p(tmds_d_p)
 );
 
-iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000), .SUPPORT_RESTART(1), .SUPPORT_CRT(1), .SUPPORT_BLUR(1), .SUPPORT_SCAN(1)) iosys (
+// UART uses an extra 80 MHz PLL output; USB keeps its 96/12 MHz outputs.
+// These resets do not depend on the USB USER button.
+wire rom_reset80n;
+usb_reset_sync rom_reset80_release(.clk(clk80),.async_resetn(pll_lock_12&&resetn),.resetn(rom_reset80n));
+usb_reset_sync rom_resetm_release(.clk(mclk),.async_resetn(pll_lock_12&&resetn),.resetn(rom_reset_mclk));
+wire rom_hold,rom_game_hold,rom_uart_tx,legacy_uart_tx;
+wire [7:0] legacy_loading,legacy_loader_data;
+wire legacy_loader_valid;
+reg [1:0] rom_game_hold_sync=0;
+always @(posedge mclk)begin
+    if(!rom_reset_mclk)rom_game_hold_sync<=2'b11;
+    else rom_game_hold_sync<={rom_game_hold_sync[0],rom_game_hold};
+end
+assign UART_TXD=rom_hold?rom_uart_tx:legacy_uart_tx;
+assign loading=legacy_loading[0]||rom_game_hold_sync[1]||!rom_reset_mclk;
+assign loader_do=rom_bus_owner?rom_header_data:legacy_loader_data;
+assign loader_do_valid=rom_bus_owner?rom_header_valid:legacy_loader_valid;
+wire rom_sink_req,rom_sink_done,rom_sink_ok,rom_sink_bank,rom_block_bank;
+wire [7:0] rom_sink_op,rom_block_data;
+wire [31:0] rom_sink_offset,rom_sink_total,rom_sink_digest;
+wire [10:0] rom_sink_count;
+wire [9:0] rom_block_address;
+tc_uart_rom_link #(.CLOCK_HZ(80000000)) rom_link(
+    .clk(clk80),.resetn(rom_reset80n),.uart_rx(UART_RXD),.uart_tx(rom_uart_tx),
+    .legacy_hold(rom_hold),.game_hold(rom_game_hold),
+    .sink_req(rom_sink_req),.sink_op(rom_sink_op),.sink_offset(rom_sink_offset),.sink_total(rom_sink_total),
+    .sink_digest(rom_sink_digest),.sink_count(rom_sink_count),.sink_bank(rom_sink_bank),
+    .sink_done(rom_sink_done),.sink_ok(rom_sink_ok),.mem_clk(mclk),.mem_bank(rom_block_bank),
+    .mem_address(rom_block_address),.mem_data(rom_block_data));
+tc_snes_rom_sink rom_sink(
+    .clk(mclk),.resetn(rom_reset_mclk),.req(rom_sink_req),.req_op(rom_sink_op),.req_offset(rom_sink_offset),
+    .req_total(rom_sink_total),.req_digest(rom_sink_digest),.req_count(rom_sink_count),.req_bank(rom_sink_bank),
+    .display_status(rom_display_status),.done(rom_sink_done),.ok(rom_sink_ok),.block_bank(rom_block_bank),.block_address(rom_block_address),.block_data(rom_block_data),
+    .header_reset(rom_header_reset),.header_valid(rom_header_valid),.header_data(rom_header_data),
+    .bus_owner(rom_bus_owner),.bus_req(rom_mem_req),.bus_we(rom_mem_we),.bus_address(rom_mem_address),.bus_data(rom_mem_data),
+    .bus_ack(rom_mem_ack),.bus_read_data(cpu_port0));
+iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000), .SUPPORT_ROMXFR(1), .SUPPORT_RESTART(1), .SUPPORT_CRT(1), .SUPPORT_BLUR(1), .SUPPORT_SCAN(1)) iosys (
     .clk(mclk), .hclk(hclk), .resetn(resetn),
+    .load_row(load_row), .load_char(load_char),
     .osd_window(osd_window), .osd_window_toggle(osd_window_toggle), .osd_visible(osd_visible),
     .osd_input_block(osd_input_block),
     .overlay(overlay), .overlay_x(overlay_x), .overlay_y(overlay_y),
     .overlay_color(overlay_color),
     .joy1(joy1_btns_ds2 | joy1_btns_snes | joy1_usb), .joy2(joy2_btns_ds2 | joy2_btns_snes | joy2_usb), .hid1(hid1), .hid2(hid2),
-    .uart_tx(UART_TXD), .uart_rx(UART_RXD),
+    .uart_tx(legacy_uart_tx), .uart_rx(rom_hold?1'b1:UART_RXD), .transport_hold(rom_hold),
     .core_config(core_config), .crt_config_applied(crt_config_applied),
     .mgmt_readdata(16'b0), .fdd_request(2'b0),
-    .game_reset(game_reset), .rom_loading(loading), .rom_do(loader_do), .rom_do_valid(loader_do_valid)
+    .game_reset(game_reset), .rom_loading(legacy_loading), .rom_do(legacy_loader_data), .rom_do_valid(legacy_loader_valid)
 );
 
 `else       // VERILATOR

@@ -3,7 +3,7 @@
 
 `timescale 1ns / 1ps
 
-module snes2hdmi #(parameter CRT_STAGE1=0, CRT_BLUR=0, CRT_SCAN=0) (
+module snes2hdmi #(parameter LOAD_STATUS=0, CRT_STAGE1=0, CRT_BLUR=0, CRT_SCAN=0) (
 	input clk,      // snes clock
 	input resetn,
 
@@ -18,6 +18,9 @@ module snes2hdmi #(parameter CRT_STAGE1=0, CRT_BLUR=0, CRT_SCAN=0) (
     input [31:0] core_config,
     output [31:0] crt_config_applied,
 
+    input [4:0] load_status,
+    output wire load_row,
+    output wire [7:0] load_char,
     input overlay,
     input [31:0] osd_window,
     input osd_window_toggle,
@@ -346,9 +349,26 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
         assign game_rgb_crt=game_rgb_raw;
     end endgenerate
 
+    wire load_pixel;
+    generate if(LOAD_STATUS)begin: load_display
+        wire [4:0] synced;
+        usb_game_cdc #(.WIDTH(5)) status_cdc(.src_clk(clk),.src_resetn(resetn),.src_valid(1'b0),
+            .src_data(load_status),.dst_clk(clk_pixel),.dst_resetn(resetn),.dst_data(synced),.dst_valid());
+        tc_load_label label(.clk(clk_pixel),.resetn(resetn),.status(synced),
+            .frame_start(cx==0 && cy==0),.column(overlay_x[7:3]),.row(overlay_y[7:3]),
+            .load_row(load_row),.load_char(load_char));
+        // Match the two-clock textdisp latency, including when OSD1 is closed.
+        reg [1:0] mask=0;
+        always @(posedge clk_pixel)
+            mask <= resetn ? {mask[0], load_row && cx>=XSTART && cx<XSTOP && cy<720} : 2'b0;
+        assign load_pixel=mask[1];
+    end else begin
+        assign load_pixel=0; assign load_row=0; assign load_char=8'h20;
+    end endgenerate
     // calc rgb value to hdmi
     always @(posedge clk_pixel) begin
-        if (active) begin
+        if (load_pixel) rgb <= {overlay_color[4:0],3'b0,overlay_color[9:5],3'b0,overlay_color[14:10],3'b0};
+        else if (active) begin
             if (osd_pixel)
                 rgb <= {overlay_color[4:0],3'b0,overlay_color[9:5],3'b0,overlay_color[14:10],3'b0};       // BGR5 to RGB8
             else
