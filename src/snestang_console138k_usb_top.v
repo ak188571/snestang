@@ -12,6 +12,8 @@
 import configPackage::*;
 
 module snestang_top (
+    input wire spi_csn, spi_sck, spi_mosi,
+    output wire spi_miso,
     input sys_clk,
     input s0,
 
@@ -87,6 +89,9 @@ module snestang_top (
     output [SDRAM_DATA_WIDTH/8-1:0] O_sdram_dqm,       // 
     output [1:0] O_sdram_ba         // 4 banks
 );
+    // Internal configuration net: no package output for the JTAG mux.
+    wire jtagseln /* synthesis syn_keep=1 */;
+    assign spi_miso = 1'bz;
 wire osd_input_block;
 `ifdef VERILATOR
 assign osd_input_block=1'b0;
@@ -598,7 +603,7 @@ assign joy2_btns_ds2 = 12'h0;
 `endif
 
 `ifdef USB1
-wire clk12,clk96,clk80;
+wire clk12,clk96,clk80,clk150;
 wire usb_reset96n;
 usb_reset_sync usb_reset96_release (.clk(clk96), .async_resetn(pll_lock_12 && s0), .resetn(usb_reset96n));
 wire pll_lock_12;
@@ -610,7 +615,7 @@ wire [1:0] usb_type;
 wire p1_report;
 wire p1_connected;
 wire p1_auto_start_seen, p1_auto_wdt_seen;
-pll_usb pll12(.clkin(sys_clk), .clk12(clk12), .clk96(clk96), .clk80(clk80), .lock(pll_lock_12));
+pll_usb pll12(.clkin(sys_clk), .clk12(clk12), .clk96(clk96), .clk80(clk80), .clk150(clk150), .lock(pll_lock_12));
 usb_dual_speed_host usb_hid_host (
     .usbclk96(clk96), .usbrst96_n(usb_reset96n), .usbclk(clk12), .usbrst_n(usb_resetn),
     .usb_dm(usb1_dn), .usb_dp(usb1_dp),
@@ -718,8 +723,9 @@ snes2hdmi #(.LOAD_STATUS(1),.CRT_STAGE1(1), .CRT_BLUR(1), .CRT_SCAN(1)) s2h(
 
 // UART uses an extra 80 MHz PLL output; USB keeps its 96/12 MHz outputs.
 // These resets do not depend on the USB USER button.
-wire rom_reset80n;
+wire rom_reset80n,rom_reset150n;
 usb_reset_sync rom_reset80_release(.clk(clk80),.async_resetn(pll_lock_12&&resetn),.resetn(rom_reset80n));
+usb_reset_sync rom_reset150_release(.clk(clk150),.async_resetn(pll_lock_12&&resetn),.resetn(rom_reset150n));
 usb_reset_sync rom_resetm_release(.clk(mclk),.async_resetn(pll_lock_12&&resetn),.resetn(rom_reset_mclk));
 wire rom_hold,rom_game_hold,rom_uart_tx,legacy_uart_tx;
 wire [7:0] legacy_loading,legacy_loader_data;
@@ -740,7 +746,9 @@ wire [31:0] rom_sink_offset,rom_sink_total,rom_sink_digest;
 wire [10:0] rom_sink_count;
 wire [9:0] rom_block_address;
 tc_uart_rom_link #(.CLOCK_HZ(80000000)) rom_link(
-    .clk(clk80),.resetn(rom_reset80n),.uart_rx(UART_RXD),.uart_tx(rom_uart_tx),
+    .clk(clk80),.resetn(rom_reset80n),.spi_clk(clk150),.spi_resetn(rom_reset150n),
+    .uart_rx(UART_RXD),.uart_tx(rom_uart_tx),
+    .spi_cs_n(spi_csn),.spi_sck(spi_sck),.spi_mosi(spi_mosi),.spi_selected(jtagseln),
     .legacy_hold(rom_hold),.game_hold(rom_game_hold),
     .sink_req(rom_sink_req),.sink_op(rom_sink_op),.sink_offset(rom_sink_offset),.sink_total(rom_sink_total),
     .sink_digest(rom_sink_digest),.sink_count(rom_sink_count),.sink_bank(rom_sink_bank),

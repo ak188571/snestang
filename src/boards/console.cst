@@ -160,3 +160,13 @@ IO_LOC "O_sdram_cas_n" E17;
 IO_PORT "O_sdram_cas_n" IO_TYPE=LVCMOS33;
 IO_LOC "O_sdram_cs_n" F21;      // was F19 on mega60k
 IO_PORT "O_sdram_cs_n" IO_TYPE=LVCMOS33;
+NET_LOC "rom_link/jtagseln" V_JTAGSELN;
+IO_LOC "spi_csn" T13;
+IO_PORT "spi_csn" PULL_MODE=UP IO_TYPE=LVCMOS33;
+IO_LOC "spi_sck" V12;
+IO_PORT "spi_sck" PULL_MODE=NONE DRIVE=OFF IO_TYPE=LVCMOS33;
+IO_LOC "spi_mosi" R13;
+IO_PORT "spi_mosi" PULL_MODE=NONE DRIVE=OFF IO_TYPE=LVCMOS33;
+IO_LOC "spi_miso" U13;
+IO_PORT "spi_miso" PULL_MODE=NONE DRIVE=8 IO_TYPE=LVCMOS33;
+IO_LOC "O_sdram_cke" W12;

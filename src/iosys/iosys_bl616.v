@@ -74,8 +74,8 @@ localparam [8*BASE_STR_LEN-1:0] BASE_CONF_STR = (SUPPORT_CRT && SUPPORT_BLUR && 
     (SUPPORT_RESTART ? "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1;RSTROM1" : "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;CRTSTG1") :
     (SUPPORT_RESTART ? "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1;RSTROM1" : "Tangcores;-;O12,OSD key,Right+Select,Select+Start,Select+RB;-;V,v20240101;OSDWIN1");
 
-localparam integer STR_LEN=BASE_STR_LEN+(SUPPORT_ROMXFR?16:0);
-localparam [8*STR_LEN-1:0] CONF_STR=SUPPORT_ROMXFR?{BASE_CONF_STR,";ROMXFR1;UART8M1"}:BASE_CONF_STR;
+localparam integer STR_LEN=BASE_STR_LEN+(SUPPORT_ROMXFR?24:0);
+localparam [8*STR_LEN-1:0] CONF_STR=SUPPORT_ROMXFR?{BASE_CONF_STR,";ROMXFR1;UART8M1;SPIDAT1"}:BASE_CONF_STR;
 reg [1:0] transport_hold_sync=0;
 always @(posedge clk)begin
     if(!resetn)transport_hold_sync<=0;

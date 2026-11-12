@@ -1,5 +1,6 @@
 module tb_rom_uart(
-    input logic clk,mem_clk,resetn,uart_rx,
+    input logic clk,spi_clk,mem_clk,resetn,uart_rx,
+    input logic spi_cs_n,spi_sck,spi_mosi, output wire spi_selected,
     output wire uart_tx,
     input logic stall_memory,corrupt_read,
     output wire held,owned,at_fast,observed_valid,observed_error,sink_processing,
@@ -21,7 +22,9 @@ module tb_rom_uart(
     assign observed_valid=link.rx_valid;
     assign observed_error=link.rx_error;
     assign observed_byte=link.rx_data;
-    tc_uart_rom_link link(.clk(clk),.resetn(resetn),.uart_rx(uart_rx),.uart_tx(uart_tx),
+    tc_uart_rom_link link(.clk(clk),.resetn(resetn),.spi_clk(spi_clk),.spi_resetn(resetn),
+        .uart_rx(uart_rx),.uart_tx(uart_tx),
+        .spi_cs_n(spi_cs_n),.spi_sck(spi_sck),.spi_mosi(spi_mosi),.spi_selected(spi_selected),
         .legacy_hold(owned),.game_hold(held),
         .sink_req(req),.sink_op(operation),.sink_offset(offset),.sink_total(total),.sink_digest(digest),.sink_count(count),.sink_bank(bank),
         .sink_done(done),.sink_ok(ok),.mem_clk(mem_clk),.mem_bank(rd_bank),.mem_address(address),.mem_data(mem_data));

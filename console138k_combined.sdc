@@ -103,6 +103,22 @@ create_clock -name clk96 -period 10.416666667 -waveform {0 5.2083333335} [get_ne
 # Extra PLL output for the ROM transport; USB remains at clk96/clk12.
 create_clock -name clk80 -period 12.5 -waveform {0 6.25} [get_nets {clk80}]
 
+# 150 MHz is confined to SPI input sampling and the source side of its mailbox.
+create_clock -name clk150 -period 6.666666667 -waveform {0 3.3333333335} [get_nets {clk150}]
+set_false_path -to [get_pins {
+ rom_reset150_release/reset_pipe_0_s0/CLEAR
+ rom_reset150_release/reset_pipe_1_s0/CLEAR
+}]
+set_false_path -to [get_regs {
+ rom_link/spi_crossing/owner_sync_0_s0
+ rom_link/spi_crossing/ack_sync_0_s0
+ rom_link/spi_crossing/req_sync_0_s0
+ rom_link/spi_crossing/overrun_sync_0_s0
+}]
+# The request crosses two destination stages before the held byte is read.
+set_max_delay -from [get_regs {rom_link/spi_crossing/source_data_*}] -to [get_regs {rom_link/spi_crossing/byte_data_*}] 12.5
+set_false_path -hold -from [get_regs {rom_link/spi_crossing/source_data_*}] -to [get_regs {rom_link/spi_crossing/byte_data_*}]
+
 # ROM transport: only first synchronizer stages and held descriptor captures.
 # The request is synchronized twice before capture; DISPATCH adds a destination
 # cycle. The descriptor and RAM bank remain stable until the returned done.

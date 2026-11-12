@@ -7,17 +7,18 @@
 //Device Version: B
 //Created Time: Sat Mar 29 15:41:54 2025
 
-module pll_usb (lock, clk12, clk96, clk80, clkin);
+module pll_usb (lock, clk12, clk96, clk80, clk150, clkin);
 
 output lock;
 output clk12;
 output clk96;
 // Extra output only: 1200 MHz VCO / 15. Existing 96/12 MHz outputs unchanged.
 output clk80;
+// SPI input sampling: the existing 1200 MHz VCO divided by 8.
+output clk150;
 input clkin;
 
 
-wire clkout3;
 wire clkout4;
 wire clkout5;
 wire clkout6;
@@ -33,7 +34,7 @@ PLL PLL_inst (
     .CLKOUT0(clk96),
     .CLKOUT1(clk12),
     .CLKOUT2(clk80),
-    .CLKOUT3(clkout3),
+    .CLKOUT3(clk150),
     .CLKOUT4(clkout4),
     .CLKOUT5(clkout5),
     .CLKOUT6(clkout6),
@@ -95,7 +96,7 @@ defparam PLL_inst.ODIV0_FRAC_SEL = 4;
 defparam PLL_inst.CLKOUT0_EN = "TRUE";
 defparam PLL_inst.CLKOUT1_EN = "TRUE";
 defparam PLL_inst.CLKOUT2_EN = "TRUE";
-defparam PLL_inst.CLKOUT3_EN = "FALSE";
+defparam PLL_inst.CLKOUT3_EN = "TRUE";
 defparam PLL_inst.CLKOUT4_EN = "FALSE";
 defparam PLL_inst.CLKOUT5_EN = "FALSE";
 defparam PLL_inst.CLKOUT6_EN = "FALSE";
