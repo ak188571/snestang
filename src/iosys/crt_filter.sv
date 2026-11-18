@@ -169,19 +169,47 @@ endmodule
 module crt_screen_edges #(
     parameter integer LEFT = 160, RIGHT = 1120, HEIGHT = 720
 ) (
-    input wire pclk, resetn, game_pixel, vignette,
+    input wire pclk, resetn, game_pixel, vignette, rounded,
     input wire [10:0] x,
     input wire [9:0] y,
     input wire [23:0] pixel,
     output wire [23:0] rgb_out
 );
+    // A 32-pixel quarter-circle sampled at pixel centers. The table gives
+    // the number of pixels to replace at either end of this scanline.
+    function automatic [4:0] corner_inset(input [4:0] row);
+        case (row)
+            5'd0: corner_inset = 5'd26;
+            5'd1: corner_inset = 5'd22;
+            5'd2: corner_inset = 5'd20;
+            5'd3: corner_inset = 5'd17;
+            5'd4: corner_inset = 5'd16;
+            5'd5: corner_inset = 5'd14;
+            5'd6: corner_inset = 5'd13;
+            5'd7: corner_inset = 5'd11;
+            5'd8: corner_inset = 5'd10;
+            5'd9: corner_inset = 5'd9;
+            5'd10: corner_inset = 5'd8;
+            5'd11, 5'd12: corner_inset = 5'd7;
+            5'd13: corner_inset = 5'd6;
+            5'd14, 5'd15: corner_inset = 5'd5;
+            5'd16: corner_inset = 5'd4;
+            5'd17, 5'd18, 5'd19: corner_inset = 5'd3;
+            5'd20, 5'd21: corner_inset = 5'd2;
+            5'd22, 5'd23, 5'd24, 5'd25: corner_inset = 5'd1;
+            default: corner_inset = 0;
+        endcase
+    endfunction
+
     // At x=0 there is ample time before the first game pixel on this line.
     wire [9:0] from_bottom = HEIGHT - 1 - y;
     wire [9:0] dy = (y < HEIGHT/2) ? y : from_bottom;
     reg [5:0] line_loss = 0;
+    reg [4:0] inset = 0;
     always @(posedge pclk) begin
         if (x == 0) begin
             line_loss <= dy < 128 ? 6'd32 - dy[6:2] : 0;
+            inset <= dy < 32 ? corner_inset(dy[4:0]) : 0;
         end
     end
 
@@ -190,14 +218,16 @@ module crt_screen_edges #(
     wire [10:0] dx = x < (LEFT+RIGHT)/2 ? from_left : from_right;
     wire [5:0] column_loss = dx < 128 ? 6'd32 - dx[6:2] : 0;
     reg [7:0] gain = 8'd128;
+    reg cut = 0;
     always @(posedge pclk) begin
         gain <= resetn && game_pixel && vignette ?
                 8'd128 - line_loss - column_loss : 8'd128;
+        cut <= resetn && game_pixel && rounded && dx < inset;
     end
 
     // Unity gain retains every bit, including OSD and the existing phosphor mask.
     for (genvar c=0; c<3; c=c+1) begin : component
         wire [15:0] scaled = pixel[8*c +: 8] * gain;
-        assign rgb_out[8*c +: 8] = scaled[14:7];
+        assign rgb_out[8*c +: 8] = cut ? 8'h30 : scaled[14:7];
     end
 endmodule

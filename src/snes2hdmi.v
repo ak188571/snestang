@@ -387,7 +387,7 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
         .temperature(crt_config_active[27:26]), .mode(crt_config_active[23:22]), .composed_rgb(composed_rgb), .rgb_out(phosphor_rgb));
         crt_screen_edges #(.LEFT(XSTART), .RIGHT(XSTOP), .HEIGHT(FRAMEHEIGHT)) edges(
             .pclk(clk_pixel), .resetn(resetn), .game_pixel(crt_config_active[16] && active && cy<FRAMEHEIGHT && !osd_pixel && !load_pixel),
-            .vignette(crt_config_active[28]),
+            .vignette(crt_config_active[28]), .rounded(crt_config_active[29]),
             .x(cx), .y(cy), .pixel(phosphor_rgb), .rgb_out(rgb));
     end else begin : no_phosphor
         assign rgb = composed_rgb;
