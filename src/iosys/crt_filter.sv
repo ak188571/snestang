@@ -163,3 +163,41 @@ module crt_tone_channel #(parameter GREEN = 0) (
     end endgenerate
     always @(posedge pclk) corrected <= transfer[{gamma_mode, attenuate, sample}];
 endmodule
+
+// Screen-space effects for the active game rectangle. The control registers
+// advance on the same edge as the converter's existing RGB compositor.
+module crt_screen_edges #(
+    parameter integer LEFT = 160, RIGHT = 1120, HEIGHT = 720
+) (
+    input wire pclk, resetn, game_pixel, vignette,
+    input wire [10:0] x,
+    input wire [9:0] y,
+    input wire [23:0] pixel,
+    output wire [23:0] rgb_out
+);
+    // At x=0 there is ample time before the first game pixel on this line.
+    wire [9:0] from_bottom = HEIGHT - 1 - y;
+    wire [9:0] dy = (y < HEIGHT/2) ? y : from_bottom;
+    reg [5:0] line_loss = 0;
+    always @(posedge pclk) begin
+        if (x == 0) begin
+            line_loss <= dy < 128 ? 6'd32 - dy[6:2] : 0;
+        end
+    end
+
+    wire [10:0] from_left = x - LEFT;
+    wire [10:0] from_right = RIGHT - 1 - x;
+    wire [10:0] dx = x < (LEFT+RIGHT)/2 ? from_left : from_right;
+    wire [5:0] column_loss = dx < 128 ? 6'd32 - dx[6:2] : 0;
+    reg [7:0] gain = 8'd128;
+    always @(posedge pclk) begin
+        gain <= resetn && game_pixel && vignette ?
+                8'd128 - line_loss - column_loss : 8'd128;
+    end
+
+    // Unity gain retains every bit, including OSD and the existing phosphor mask.
+    for (genvar c=0; c<3; c=c+1) begin : component
+        wire [15:0] scaled = pixel[8*c +: 8] * gain;
+        assign rgb_out[8*c +: 8] = scaled[14:7];
+    end
+endmodule
