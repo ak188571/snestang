@@ -215,7 +215,8 @@ module snes2hdmi #(parameter LOAD_STATUS=0, CRT_STAGE1=0, CRT_BLUR=0, CRT_SCAN=0
     //
     // Video
     //
-    reg [23:0] rgb;             // actual RGB output
+    reg [23:0] composed_rgb;
+    wire [23:0] rgb;
     reg active;
     reg [7:0] xx;               // scaled-down pixel position
     reg [7:0] yy;
@@ -367,15 +368,24 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
     end endgenerate
     // calc rgb value to hdmi
     always @(posedge clk_pixel) begin
-        if (load_pixel) rgb <= {overlay_color[4:0],3'b0,overlay_color[9:5],3'b0,overlay_color[14:10],3'b0};
+        if (load_pixel) composed_rgb <= {overlay_color[4:0],3'b0,overlay_color[9:5],3'b0,overlay_color[14:10],3'b0};
         else if (active) begin
             if (osd_pixel)
-                rgb <= {overlay_color[4:0],3'b0,overlay_color[9:5],3'b0,overlay_color[14:10],3'b0};       // BGR5 to RGB8
+                composed_rgb <= {overlay_color[4:0],3'b0,overlay_color[9:5],3'b0,overlay_color[14:10],3'b0};       // BGR5 to RGB8
             else
-                rgb <= game_rgb_crt;
+                composed_rgb <= game_rgb_crt;
         end else
-            rgb <= 24'h303030;
+            composed_rgb <= 24'h303030;
     end
+
+    generate if (CRT_STAGE1 && (CRT_BLUR || CRT_SCAN)) begin : phosphor_path
+        crt_phosphor_mask phosphors(
+            .pclk(clk_pixel), .resetn(resetn), .before_first(cx==XSTART-1),
+            .odd_row(cy[0]), .game_pixel(crt_config_active[16] && active && cy<FRAMEHEIGHT && !osd_pixel && !load_pixel),
+            .mode(crt_config_active[23:22]), .composed_rgb(composed_rgb), .rgb_out(rgb));
+    end else begin : no_phosphor
+        assign rgb = composed_rgb;
+    end endgenerate
 
     // HDMI output.
     logic[2:0] tmds;

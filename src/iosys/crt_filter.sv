@@ -100,3 +100,34 @@ module crt_filter (
     // retains the exact legacy read timing; registered effect paths are compensated.
     assign rgb_out=scan_enabled?scanned:strength!=0?blurred_q:rgb_in;
 endmodule
+
+// The RGB input is the converter's existing registered composite pixel.
+// Register its per-channel mask in parallel, so no pixel delay is added.
+module crt_phosphor_mask (
+    input wire pclk, resetn,
+    input wire before_first, odd_row, game_pixel,
+    input wire [1:0] mode,
+    input wire [23:0] composed_rgb,
+    output wire [23:0] rgb_out
+);
+    // One-hot RGB order. Restart the pattern at the game's left edge on every row.
+    reg [2:0] stripe = 3'b100;
+    always @(posedge pclk) begin
+        if (!resetn || before_first) stripe <= 3'b100;
+        else stripe <= {stripe[0], stripe[2:1]};
+    end
+
+    reg [2:0] full_strength = 3'b111;
+    always @(posedge pclk) begin
+        if (!resetn || !game_pixel) full_strength <= 3'b111;
+        else case (mode)
+            2'd1: full_strength <= stripe;
+            2'd2: full_strength <= odd_row ? {stripe[0], stripe[2:1]} : stripe;
+            default: full_strength <= 3'b111;
+        endcase
+    end
+    for (genvar ch=0; ch<3; ch=ch+1) begin : phosphor_channel
+        wire [7:0] sample = composed_rgb[8*ch +: 8];
+        assign rgb_out[8*ch +: 8] = full_strength[ch] ? sample : (sample >> 1);
+    end
+endmodule
