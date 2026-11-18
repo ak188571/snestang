@@ -76,9 +76,26 @@ module crt_filter (
         end
     endfunction
     wire scan_enabled=config_active[16] && |config_active[20:19];
-    wire [23:0] scanned={dim_channel(scan_input[23:16],scan_depth),
-                    dim_channel(scan_input[15:8],scan_depth),
-                    dim_channel(scan_input[7:0],scan_depth)};
+    // Frame-applied core_config[21]: brightness-dependent scanline depth.
+    // Use the source pixel at the FIR center. Capture its brightness class
+    // alongside blurred_q (or palette_q when blur is disabled).
+    wire [23:0] beam_pixel = strength != 0 ? center : rgb_in;
+    wire [3:0] luma = {2'b0, beam_pixel[23:22]} +
+                      {1'b0, beam_pixel[15:14], 1'b0} +
+                      {2'b0, beam_pixel[7:6]};
+    reg [1:0] beam_class = 0;
+    always @(posedge pclk) begin
+        if (!resetn) beam_class <= 0;
+        else beam_class <= luma[3:2];
+    end
+    // Middle band retains about 3/4 of the depth, highlights retain 1/2.
+    wire [3:0] middle_depth = scan_depth - (({1'b0, scan_depth} + 5'd2) >> 2);
+    wire [3:0] beam_depth = !config_active[21] ? scan_depth :
+                            beam_class[1] ? (scan_depth >> 1) :
+                            beam_class[0] ? middle_depth : scan_depth;
+    wire [23:0] scanned={dim_channel(scan_input[23:16],beam_depth),
+                    dim_channel(scan_input[15:8],beam_depth),
+                    dim_channel(scan_input[7:0],beam_depth)};
     // Raw palette RGB never passes through the gain arithmetic. Master OFF
     // retains the exact legacy read timing; registered effect paths are compensated.
     assign rgb_out=scan_enabled?scanned:strength!=0?blurred_q:rgb_in;
