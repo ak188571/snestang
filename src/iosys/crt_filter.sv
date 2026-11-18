@@ -234,3 +234,59 @@ module crt_screen_edges #(
         assign rgb_out[8*c +: 8] = cut ? 8'h30 : scaled[14:7];
     end
 endmodule
+
+// Three-tap horizontal chroma FIR. Preserve the current pixel's luma and
+// average color difference at x, x-1, x-2 with weights 2,1,1. First-pixel
+// replication prevents any sample from the preceding line entering the mix.
+module crt_chroma_bleed (
+    input wire pclk, first_pixel,
+    input wire [23:0] rgb_in,
+    output reg [23:0] rgb_out
+);
+    reg [23:0] source;
+    reg first_source, first_sample;
+    reg [31:0] sample, previous, older;
+    reg [31:0] filtered;
+    reg [7:0] center_luma;
+
+    function automatic [7:0] luma(input [23:0] rgb);
+        reg [9:0] sum;
+        begin
+            sum = {2'b0,rgb[23:16]} + {1'b0,rgb[15:8],1'b0} + {2'b0,rgb[7:0]} + 10'd2;
+            luma = sum[9:2];
+        end
+    endfunction
+
+    function automatic [7:0] average(input [7:0] current, near_left, far_left);
+        reg [9:0] sum;
+        begin
+            sum = {1'b0,current,1'b0} + {2'b0,near_left} + {2'b0,far_left} + 10'd2;
+            average = sum[9:2];
+        end
+    endfunction
+
+    // Stage 1 isolates the existing scanline gain. Stage 2 packs Y with RGB.
+    always @(posedge pclk) begin
+        source <= rgb_in;
+        first_source <= first_pixel;
+        sample <= {luma(source),source};
+        first_sample <= first_source;
+        previous <= sample;
+        older <= first_sample ? sample : previous;
+        center_luma <= sample[31:24];
+    end
+    // Stage 3 filters the four components in parallel.
+    for (genvar ch=0; ch<4; ch=ch+1) begin : tap
+        wire [7:0] current = sample[8*ch +: 8];
+        always @(posedge pclk)
+            filtered[8*ch +: 8] <= first_sample ? current :
+                average(current, previous[8*ch +: 8], older[8*ch +: 8]);
+    end
+    // Stage 4 restores the unfiltered luma and clips excursions at the RGB rails.
+    for (genvar ch=0; ch<3; ch=ch+1) begin : reconstruct
+        wire signed [9:0] value = $signed({2'b0,filtered[8*ch +: 8]}) +
+                                 $signed({2'b0,center_luma}) - $signed({2'b0,filtered[31:24]});
+        always @(posedge pclk)
+            rgb_out[8*ch +: 8] <= value[9] ? 8'd0 : value[8] ? 8'd255 : value[7:0];
+    end
+endmodule

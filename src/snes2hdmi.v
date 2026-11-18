@@ -288,6 +288,15 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
     localparam XSTART = (1280 - 960) / 2;   // 960:720 = 4:3
     localparam XSTOP = (1280 + 960) / 2;
 
+    localparam BLEED_LATENCY = 4;
+    wire bleed_enabled = CRT_STAGE1 && (CRT_BLUR || CRT_SCAN) && crt_config_active[16] && crt_config_active[31] && cy < FRAMEHEIGHT;
+    reg bleed_fetch_active = 0;
+    always @(posedge clk_pixel) begin
+        if (cx == XSTART-1-BLEED_LATENCY) bleed_fetch_active <= 1;
+        else if (cx == XSTOP-1-BLEED_LATENCY) bleed_fetch_active <= 0;
+    end
+    wire bleed_fetch = bleed_fetch_active || cx == XSTART-1-BLEED_LATENCY;
+
     // address calculation
     // Assume the video occupies fully on the Y direction, we are upscaling the video by `720/height`.
     // xcnt and ycnt are fractional scaling counters.
@@ -307,7 +316,7 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
             active <= 0;
         end
 
-        if (active_t | active) begin        // increment xx
+        if (bleed_enabled ? bleed_fetch : (active_t | active)) begin        // increment xx
             xcnt <= xcnt_next;
             if (xcnt_next >= 960) begin
                 xcnt <= xcnt_next - 960;
@@ -348,8 +357,8 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
             crt_filter crt(.pclk(clk_pixel),.resetn(resetn),
                 .rgb_in(game_rgb_raw),.config_active(crt_config_active &
                     (CRT_SCAN?32'hffffffff:~32'h00180000) & (CRT_BLUR?32'hffffffff:~32'h00060000)),
-                .first_pixel(cx==(blur_enabled?XSTART-1:XSTART)),
-                .last_pixel(cx==(blur_enabled?XSTOP-2:XSTOP-1)),.scan_depth(scan_depth),
+                .first_pixel(bleed_enabled ? cx==(blur_enabled?XSTART-1-BLEED_LATENCY:XSTART-BLEED_LATENCY) : cx==(blur_enabled?XSTART-1:XSTART)),
+                .last_pixel(bleed_enabled ? cx==(blur_enabled?XSTOP-2-BLEED_LATENCY:XSTOP-1-BLEED_LATENCY) : cx==(blur_enabled?XSTOP-2:XSTOP-1)),.scan_depth(scan_depth),
                 .rgb_out(game_rgb_crt));
         end else begin : bypass_path
             tc_crt_bypass crt(.rgb_in(game_rgb_raw),.rgb_out(game_rgb_crt));
@@ -376,6 +385,14 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
     end else begin
         assign load_pixel=0; assign load_row=0; assign load_char=8'h20;
     end endgenerate
+    wire [23:0] bleed_rgb;
+    generate if (CRT_STAGE1 && (CRT_BLUR || CRT_SCAN)) begin : chroma_path
+        crt_chroma_bleed bleed(.pclk(clk_pixel), .first_pixel(cx==XSTART-BLEED_LATENCY),
+        .rgb_in(game_rgb_crt), .rgb_out(bleed_rgb));
+    end else begin : no_chroma
+        assign bleed_rgb=0;
+    end endgenerate
+    wire [23:0] game_rgb_display = bleed_enabled ? bleed_rgb : game_rgb_crt;
     // calc rgb value to hdmi
     always @(posedge clk_pixel) begin
         if (load_pixel) composed_rgb <= {overlay_color[4:0],3'b0,overlay_color[9:5],3'b0,overlay_color[14:10],3'b0};
@@ -383,7 +400,7 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
             if (osd_pixel)
                 composed_rgb <= {overlay_color[4:0],3'b0,overlay_color[9:5],3'b0,overlay_color[14:10],3'b0};       // BGR5 to RGB8
             else
-                composed_rgb <= game_rgb_crt;
+                composed_rgb <= game_rgb_display;
         end else
             composed_rgb <= 24'h303030;
     end
@@ -393,7 +410,7 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
         crt_phosphor_mask phosphors(
             .pclk(clk_pixel), .resetn(resetn), .before_first(cx==XSTART-1),
             .odd_row(cy[0]), .game_pixel(crt_config_active[16] && active && cy<FRAMEHEIGHT && !osd_pixel && !load_pixel),
-            .game_rgb(game_rgb_crt), .gamma_mode(crt_config_active[25:24]),
+            .game_rgb(game_rgb_display), .gamma_mode(crt_config_active[25:24]),
         .temperature(crt_config_active[27:26]), .mode(crt_config_active[23:22]), .composed_rgb(composed_rgb), .rgb_out(phosphor_rgb));
         crt_screen_edges #(.LEFT(XSTART), .RIGHT(XSTOP), .HEIGHT(FRAMEHEIGHT)) edges(
             .pclk(clk_pixel), .resetn(resetn), .game_pixel(crt_config_active[16] && active && cy<FRAMEHEIGHT && !osd_pixel && !load_pixel),
