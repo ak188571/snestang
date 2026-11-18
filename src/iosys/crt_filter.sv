@@ -106,7 +106,7 @@ endmodule
 module crt_phosphor_mask (
     input wire pclk, resetn,
     input wire before_first, odd_row, game_pixel,
-    input wire [1:0] mode, gamma_mode,
+    input wire [1:0] mode, gamma_mode, temperature,
     input wire [23:0] game_rgb,
     input wire [23:0] composed_rgb,
     output wire [23:0] rgb_out
@@ -128,31 +128,38 @@ module crt_phosphor_mask (
         endcase
     end
     // Decode the frame-latched word. Reserved value 3 bypasses each control.
+    wire warm = temperature == 1, cool = temperature == 2;
     reg tone_enabled = 0;
     always @(posedge pclk)
         tone_enabled <= resetn && game_pixel &&
-                        (gamma_mode == 1 || gamma_mode == 2);
+                        (gamma_mode == 1 || gamma_mode == 2 || warm || cool);
 
     // Read the transfer function on the same edge as the RGB compositor.
     // OSD, load text, borders and master OFF retain the composite pixel.
     for (genvar ch=0; ch<3; ch=ch+1) begin : phosphor_channel
+        wire attenuate = (ch == 2) ? cool : (ch == 1) ? (warm || cool) : warm;
         wire [7:0] corrected;
-        crt_tone_channel tone(
-            .pclk(pclk), .gamma_mode(gamma_mode),
+        crt_tone_channel #(.GREEN(ch == 1)) tone(
+            .pclk(pclk), .gamma_mode(gamma_mode), .attenuate(attenuate),
             .sample(game_rgb[8*ch +: 8]), .corrected(corrected));
         wire [7:0] sample = tone_enabled ? corrected : composed_rgb[8*ch +: 8];
         assign rgb_out[8*ch +: 8] = full_strength[ch] ? sample : (sample >> 1);
     end
 endmodule
 
-// Address = {gamma preset, input code}. Presets 0 and 3 use unity gamma.
-module crt_tone_channel (
-    input wire pclk,
+// Address = {gamma preset, white-point attenuation, input code}.
+// 2048 x 8 fits one Gowin block RAM. Presets 0 and 3 use unity gamma.
+module crt_tone_channel #(parameter GREEN = 0) (
+    input wire pclk, attenuate,
     input wire [1:0] gamma_mode,
     input wire [7:0] sample,
     output reg [7:0] corrected
 );
-    reg [7:0] transfer [0:1023] /* synthesis syn_ramstyle="block_ram" */;
-    initial $readmemh("crt_gamma.hex", transfer);
-    always @(posedge pclk) corrected <= transfer[{gamma_mode, sample}];
+    reg [7:0] transfer [0:2047] /* synthesis syn_ramstyle="block_ram" */;
+    generate if (GREEN) begin
+        initial $readmemh("crt_tone_green.hex", transfer);
+    end else begin
+        initial $readmemh("crt_tone_rb.hex", transfer);
+    end endgenerate
+    always @(posedge pclk) corrected <= transfer[{gamma_mode, attenuate, sample}];
 endmodule
