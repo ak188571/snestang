@@ -3,7 +3,7 @@
 
 `timescale 1ns / 1ps
 
-module snes2hdmi #(parameter LOAD_STATUS=0, CRT_STAGE1=0, CRT_BLUR=0, CRT_SCAN=0) (
+module snes2hdmi #(parameter LOAD_STATUS=0, CRT_STAGE1=0, CRT_BLUR=0, CRT_SCAN=0, OVERSCAN=0) (
 	input clk,      // snes clock
 	input resetn,
 
@@ -51,7 +51,8 @@ module snes2hdmi #(parameter LOAD_STATUS=0, CRT_STAGE1=0, CRT_BLUR=0, CRT_SCAN=0
 	output       tmds_clk_n,
 	output       tmds_clk_p,
 	output [2:0] tmds_d_n,
-	output [2:0] tmds_d_p
+	output [2:0] tmds_d_p,
+    input [31:0] overscan_widths
 );
 
     localparam FRAMEWIDTH = 1280;       // 720P
@@ -224,6 +225,15 @@ module snes2hdmi #(parameter LOAD_STATUS=0, CRT_STAGE1=0, CRT_BLUR=0, CRT_SCAN=0
     reg [10:0] ycnt;            // fractional scaling counters
     reg [9:0] cy_r;
     wire [31:0] crt_config_active;
+    wire [31:0] overscan_active;
+    generate if (OVERSCAN) begin : overscan_config
+        // Use the existing frame-boundary mailbox for the independent four-byte word.
+        tc_crt_config widths(.clk(clk), .pclk(clk_pixel), .resetn(resetn),
+            .requested(overscan_widths), .frame_start(cx==0 && cy==0),
+            .active_config(overscan_active), .applied_config());
+    end else begin : no_overscan_config
+        assign overscan_active=0;
+    end endgenerate
     wire blur_enabled=CRT_STAGE1 && CRT_BLUR && crt_config_active[16] && |crt_config_active[18:17];
     wire scan_enabled=CRT_STAGE1 && CRT_SCAN && crt_config_active[16] && |crt_config_active[20:19];
     // Current SNES scaler: 256/960 source pixels per output pixel. Three
@@ -388,6 +398,7 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
         crt_screen_edges #(.LEFT(XSTART), .RIGHT(XSTOP), .HEIGHT(FRAMEHEIGHT)) edges(
             .pclk(clk_pixel), .resetn(resetn), .game_pixel(crt_config_active[16] && active && cy<FRAMEHEIGHT && !osd_pixel && !load_pixel),
             .vignette(crt_config_active[28]), .rounded(crt_config_active[29]),
+            .overscan(crt_config_active[30]), .widths(overscan_active),
             .x(cx), .y(cy), .pixel(phosphor_rgb), .rgb_out(rgb));
     end else begin : no_phosphor
         assign rgb = composed_rgb;

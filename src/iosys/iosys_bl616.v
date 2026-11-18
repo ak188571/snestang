@@ -64,7 +64,8 @@ module iosys_bl616 #(
 
     // UART interface
     input  uart_rx,
-    output uart_tx
+    output uart_tx,
+    output reg [31:0] overscan_widths
 );
 
 localparam integer BASE_STR_LEN = 81 + (SUPPORT_CRT ? 8 : 0) + (SUPPORT_CRT && SUPPORT_BLUR ? 8 : 0) + (SUPPORT_CRT && SUPPORT_BLUR && SUPPORT_SCAN ? 8 : 0) + (SUPPORT_RESTART ? 8 : 0);
@@ -212,6 +213,7 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x01                       get core ID (response type 0x01, see below), frame_len = 1
 // 0x02                       get core config string (response type 0x02, see below)
 // 0x13                       20 ms ROM-preserving game reset (RSTROM1 only)
+// 0x14 top bottom left right  set four unsigned widths in output pixels (frame_len = 5)
 // 0x03 x[31:0]               set core config status
 // 0x04 x[7:0] y[7:0]         move overlay text cursor to (x, y)
 // 0x05 <string>              display string from cursor (len implied by frame header, =frame_len-1)
@@ -245,6 +247,7 @@ always @(posedge clk) begin
         rom_loading_reg <= 0;
         rom_remain <= 0;
         core_config <= 0;
+        overscan_widths <= 0;
         restart_count <= 0;
         data_cnt <= 0;
         x_wr <= 0;
@@ -317,6 +320,9 @@ always @(posedge clk) begin
                             core_config <= {data_reg[23:0], rx_data};
                         end
                     end
+                    // Commit all four widths together after the complete command.
+                    8'h14: if (len_reg == 5 && data_cnt == 3)
+                        overscan_widths <= {data_reg[23:0], rx_data};
                     4: case (data_cnt)              // cursor
                         0: cursor_x <= rx_data;
                         1: cursor_y <= rx_data;

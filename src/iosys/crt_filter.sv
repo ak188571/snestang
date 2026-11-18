@@ -169,7 +169,8 @@ endmodule
 module crt_screen_edges #(
     parameter integer LEFT = 160, RIGHT = 1120, HEIGHT = 720
 ) (
-    input wire pclk, resetn, game_pixel, vignette, rounded,
+    input wire pclk, resetn, game_pixel, vignette, rounded, overscan,
+    input wire [31:0] widths,  // unsigned output pixels: top, bottom, left, right
     input wire [10:0] x,
     input wire [9:0] y,
     input wire [23:0] pixel,
@@ -218,11 +219,13 @@ module crt_screen_edges #(
     wire [10:0] dx = x < (LEFT+RIGHT)/2 ? from_left : from_right;
     wire [5:0] column_loss = dx < 128 ? 6'd32 - dx[6:2] : 0;
     reg [7:0] gain = 8'd128;
+    wire cropped = y < widths[31:24] || from_bottom < widths[23:16] ||
+                   from_left < widths[15:8] || from_right < widths[7:0];
     reg cut = 0;
     always @(posedge pclk) begin
         gain <= resetn && game_pixel && vignette ?
                 8'd128 - line_loss - column_loss : 8'd128;
-        cut <= resetn && game_pixel && rounded && dx < inset;
+        cut <= resetn && game_pixel && ((rounded && dx < inset) || (overscan && cropped));
     end
 
     // Unity gain retains every bit, including OSD and the existing phosphor mask.

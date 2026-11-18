@@ -698,17 +698,19 @@ wire [7:0] overlay_y;
 wire [7:0] dbg_dat_out_loader;
 
 wire [31:0] core_config,crt_config_applied;
+wire [31:0] overscan_widths;
 wire [4:0] rom_display_status;
 wire load_row;
 wire [7:0] load_char;
 `ifdef VERILATOR
 assign rom_display_status=0;
 `endif
-snes2hdmi #(.LOAD_STATUS(1),.CRT_STAGE1(1), .CRT_BLUR(1), .CRT_SCAN(1)) s2h(
+snes2hdmi #(.OVERSCAN(1), .LOAD_STATUS(1),.CRT_STAGE1(1), .CRT_BLUR(1), .CRT_SCAN(1)) s2h(
     .clk(mclk), .resetn(resetn), .snes_refresh(refresh),
     .load_status((rom_display_status==1 && header_finished)?5'd0:rom_display_status),
     .load_row(load_row), .load_char(load_char),
     .core_config(core_config), .crt_config_applied(crt_config_applied),
+    .overscan_widths(overscan_widths),
     .pause_snes_for_frame_sync(pause_snes_for_frame_sync),
     .dotclk(dotclk), .hblank(~hblankn),.vblank(~vblankn),.rgb5(rgb_out),
     .xs(x_out), .ys(y_out), 
@@ -771,6 +773,7 @@ iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000), .SUPPORT_ROMXFR(1), .SUPPORT_RESTA
     .joy1(joy1_btns_ds2 | joy1_btns_snes | joy1_usb), .joy2(joy2_btns_ds2 | joy2_btns_snes | joy2_usb), .hid1(hid1), .hid2(hid2),
     .uart_tx(legacy_uart_tx), .uart_rx(rom_hold?1'b1:UART_RXD), .transport_hold(rom_hold),
     .core_config(core_config), .crt_config_applied(crt_config_applied),
+    .overscan_widths(overscan_widths),
     .mgmt_readdata(16'b0), .fdd_request(2'b0),
     .game_reset(game_reset), .rom_loading(legacy_loading), .rom_do(legacy_loader_data), .rom_do_valid(legacy_loader_valid)
 );
