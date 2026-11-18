@@ -106,7 +106,8 @@ endmodule
 module crt_phosphor_mask (
     input wire pclk, resetn,
     input wire before_first, odd_row, game_pixel,
-    input wire [1:0] mode,
+    input wire [1:0] mode, gamma_mode,
+    input wire [23:0] game_rgb,
     input wire [23:0] composed_rgb,
     output wire [23:0] rgb_out
 );
@@ -126,8 +127,32 @@ module crt_phosphor_mask (
             default: full_strength <= 3'b111;
         endcase
     end
+    // Decode the frame-latched word. Reserved value 3 bypasses each control.
+    reg tone_enabled = 0;
+    always @(posedge pclk)
+        tone_enabled <= resetn && game_pixel &&
+                        (gamma_mode == 1 || gamma_mode == 2);
+
+    // Read the transfer function on the same edge as the RGB compositor.
+    // OSD, load text, borders and master OFF retain the composite pixel.
     for (genvar ch=0; ch<3; ch=ch+1) begin : phosphor_channel
-        wire [7:0] sample = composed_rgb[8*ch +: 8];
+        wire [7:0] corrected;
+        crt_tone_channel tone(
+            .pclk(pclk), .gamma_mode(gamma_mode),
+            .sample(game_rgb[8*ch +: 8]), .corrected(corrected));
+        wire [7:0] sample = tone_enabled ? corrected : composed_rgb[8*ch +: 8];
         assign rgb_out[8*ch +: 8] = full_strength[ch] ? sample : (sample >> 1);
     end
+endmodule
+
+// Address = {gamma preset, input code}. Presets 0 and 3 use unity gamma.
+module crt_tone_channel (
+    input wire pclk,
+    input wire [1:0] gamma_mode,
+    input wire [7:0] sample,
+    output reg [7:0] corrected
+);
+    reg [7:0] transfer [0:1023] /* synthesis syn_ramstyle="block_ram" */;
+    initial $readmemh("crt_gamma.hex", transfer);
+    always @(posedge pclk) corrected <= transfer[{gamma_mode, sample}];
 endmodule

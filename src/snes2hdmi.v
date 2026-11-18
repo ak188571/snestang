@@ -382,7 +382,8 @@ tc_osd_layer osd_layer(.pclk(clk_pixel),.resetn(resetn),.cx(cx),.cy(cy),
         crt_phosphor_mask phosphors(
             .pclk(clk_pixel), .resetn(resetn), .before_first(cx==XSTART-1),
             .odd_row(cy[0]), .game_pixel(crt_config_active[16] && active && cy<FRAMEHEIGHT && !osd_pixel && !load_pixel),
-            .mode(crt_config_active[23:22]), .composed_rgb(composed_rgb), .rgb_out(rgb));
+            .game_rgb(game_rgb_crt), .gamma_mode(crt_config_active[25:24]),
+        .mode(crt_config_active[23:22]), .composed_rgb(composed_rgb), .rgb_out(rgb));
     end else begin : no_phosphor
         assign rgb = composed_rgb;
     end endgenerate
